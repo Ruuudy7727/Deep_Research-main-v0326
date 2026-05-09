@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  deep_research_app:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    env_file:
+      - ./.env
+    environment:
+      MCP_CHART_SERVER_URL: "http://mcp_chart_server:1122"
+    depends_on:
+      - mcp_chart_server
+
+  mcp_chart_server:
+    image: antv/mcp-server-chart:latest
+    ports:
+      - "1122:1122"
+    # 注意：这里改成了 streamable 模式
+    command: ["mcp-server-chart", "--transport", "streamable", "--port", "1122"]
+    environment:
+      APP_PORT: 1122

@@ -1,0 +1,29 @@
+services:
+  # 1. 专门给 Python 代码使用的服务 (端口 1122)
+  streamable:
+    build:
+      context: .          # 在当前目录找 Dockerfile
+      dockerfile: Dockerfile
+    image: mcp-server-chart:streamable
+    container_name: mcp-server-chart-streamable
+    restart: unless-stopped
+    # 关键修改点：
+    # 1. 模式改为 streamable (你的代码需要这个)
+    # 2. 端口对应 1122
+    # 3. 必须加上 --host 0.0.0.0 否则外部连不上
+    command: ["node", "build/index.js", "--transport", "streamable", "--port", "1122", "--host", "0.0.0.0"]
+    ports:
+      - "1122:1122"
+
+  # 2. (可选) 给 Claude 桌面端使用的服务 (端口 1123)
+  sse:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mcp-server-chart:sse
+    container_name: mcp-server-chart-sse
+    restart: unless-stopped
+    # 端口错开，防止冲突
+    command: ["node", "build/index.js", "--transport", "sse", "--port", "1123", "--host", "0.0.0.0"]
+    ports:
+      - "1123:1123"

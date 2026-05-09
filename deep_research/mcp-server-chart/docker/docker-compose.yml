@@ -1,0 +1,29 @@
+name: mcp-server-chart
+services:
+  # SSE 模式
+  sse:
+    build: 
+      context: ..
+      dockerfile: Dockerfile
+    image: mcp-server-chart:local
+    restart: unless-stopped
+    ports:
+      - "1123:1123"
+    environment:
+      - HOST=0.0.0.0   # 添加这行
+    # 在 command 最后加上 --host 0.0.0.0
+    command: ["node", "build/index.js", "--transport", "sse", "--port", "1123", "--host", "0.0.0.0"]
+
+  # Streamable 模式 (这是你 Python 代码要用的)
+  streamable:
+    build: 
+      context: ..
+      dockerfile: Dockerfile
+    image: mcp-server-chart:local
+    restart: unless-stopped
+    ports:
+      - "1122:1122"
+    environment:
+      - HOST=0.0.0.0   # 添加这行
+    # 在 command 最后加上 --host 0.0.0.0
+    command: ["node", "build/index.js", "--transport", "streamable", "--port", "1122", "--host", "0.0.0.0"]

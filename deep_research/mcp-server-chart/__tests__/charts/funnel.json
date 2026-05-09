@@ -1,0 +1,76 @@
+{
+  "name": "generate_funnel_chart",
+  "description": "Generate a funnel chart to visualize the progressive reduction of data as it passes through stages, such as, the conversion rates of users from visiting a website to completing a purchase.",
+  "inputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "properties": {
+      "data": {
+        "description": "Data for funnel chart, such as, [{ category: '\u6d4f\u89c8\u7f51\u7ad9', value: 50000 }, { category: '\u653e\u5165\u8d2d\u7269\u8f66', value: 35000 }, { category: '\u751f\u6210\u8ba2\u5355', value: 25000 }, { category: '\u652f\u4ed8\u8ba2\u5355', value: 15000 }, { category: '\u5b8c\u6210\u4ea4\u6613', value: 8000 }].",
+        "items": {
+          "properties": {
+            "category": {
+              "type": "string"
+            },
+            "value": {
+              "type": "number"
+            }
+          },
+          "required": ["category", "value"],
+          "type": "object"
+        },
+        "minItems": 1,
+        "type": "array"
+      },
+      "height": {
+        "default": 400,
+        "description": "Set the height of chart, default is 400.",
+        "type": "number"
+      },
+      "theme": {
+        "default": "default",
+        "description": "Set the theme for the chart, optional, default is 'default'.",
+        "enum": ["default", "academy", "dark"],
+        "type": "string"
+      },
+      "style": {
+        "description": "Style configuration for the chart with a JSON object, optional.",
+        "properties": {
+          "backgroundColor": {
+            "description": "Background color of the chart, such as, '#fff'.",
+            "type": "string"
+          },
+          "palette": {
+            "description": "Color palette for the chart, it is a collection of colors.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "texture": {
+            "default": "default",
+            "description": "Set the texture for the chart, optional, default is 'default'. 'rough' refers to hand-drawn style.",
+            "enum": ["default", "rough"],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "title": {
+        "default": "",
+        "description": "Set the title of chart.",
+        "type": "string"
+      },
+      "width": {
+        "default": 600,
+        "description": "Set the width of chart, default is 600.",
+        "type": "number"
+      }
+    },
+    "required": ["data"],
+    "type": "object"
+  },
+  "annotations": {
+    "title": "Generate Funnel Chart",
+    "readOnlyHint": true
+  }
+}

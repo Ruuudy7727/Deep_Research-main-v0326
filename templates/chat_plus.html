@@ -1,0 +1,2626 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>科宝 Cobot</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --primary: #4F46E5;
+  --primary-light: #6366F1;
+  --primary-dark: #4338CA;
+  --primary-soft: #EEF2FF;
+  --bg: #F4F6FB;
+  --bg-soft: #F9FAFC;
+  --card: #FFFFFF;
+  --text-primary: #1F2937;
+  --text-secondary: #4B5563;
+  --text-muted: #94A3B8;
+  --border: #E5E7EB;
+  --border-light: #F1F5F9;
+  --green: #10B981;
+  --green-bg: #ECFDF5;
+  --orange: #F59E0B;
+  --orange-bg: #FFFBEB;
+  --red: #EF4444;
+  --red-bg: #FEF2F2;
+  --blue: #3B82F6;
+  --blue-bg: #EFF6FF;
+  --purple: #8B5CF6;
+  --purple-bg: #F5F3FF;
+  --teal: #14B8A6;
+  --teal-bg: #ECFDF5;
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 4px 14px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.12);
+  --radius: 14px;
+  --radius-sm: 10px;
+  --radius-xs: 8px;
+  --radius-lg: 18px;
+  --rail-width: 360px;
+  --sidebar-width: 220px;
+  --sidebar-collapsed-width: 64px;
+  --ai-msg-max-width: 82%;
+}
+
+/* === Global zoom: 整体放大约 110% =====================================
+   通过 html { zoom: 1.1 } 一行把 header/sidebar/卡片/字号/间距全部按比例放大
+   一档（与浏览器 Ctrl+ 到 110% 等效），同时把 body 的 100vh 折算成
+   calc(100vh / 1.1) 以避免底部输入框被挤出可视区。
+   如需更大/更小，调整下面 zoom 数值即可（建议 1.0 ~ 1.25）。
+   ====================================================================== */
+html { scroll-behavior: smooth; zoom: 1.1; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans SC', 'PingFang SC', sans-serif;
+  background: var(--bg);
+  color: var(--text-primary);
+  height: calc(100vh / 1.1);
+  display: grid;
+  grid-template-rows: 64px 1fr;
+  grid-template-columns: var(--sidebar-width) 1fr var(--rail-width);
+  grid-template-areas:
+    "header header header"
+    "sidebar main rail";
+  overflow: hidden;
+  font-size: 14px;
+}
+body[data-rail="hidden"] {
+  grid-template-columns: var(--sidebar-width) 1fr 0;
+}
+body[data-sidebar="collapsed"] {
+  grid-template-columns: var(--sidebar-collapsed-width) 1fr var(--rail-width);
+}
+body[data-sidebar="collapsed"][data-rail="hidden"] {
+  grid-template-columns: var(--sidebar-collapsed-width) 1fr 0;
+}
+
+/* ========== Header ========== */
+.app-header {
+  grid-area: header;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  padding: 0 28px;
+  display: flex; align-items: center; justify-content: space-between;
+  z-index: 50;
+  box-shadow: var(--shadow-sm);
+}
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand-logo {
+  width: 52px; height: 40px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--border-light);
+}
+.brand-logo img {
+  width: 100%; height: 100%;
+  object-fit: contain;
+}
+.brand-text h1 { font-size: 17px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.2px; }
+.brand-text p { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+.header-right { display: flex; align-items: center; gap: 14px; font-size: 13px; }
+.status-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 14px; border-radius: 999px;
+  background: var(--green-bg); color: var(--green); font-weight: 600;
+  font-size: 12px; line-height: 1;
+}
+.status-pill.memory { background: var(--purple-bg); color: var(--purple); }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse-dot 2s infinite; }
+@keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.4} }
+.workspace-select {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 14px; border-radius: 999px;
+  background: var(--bg); color: var(--text-secondary); font-weight: 500;
+  border: 1px solid var(--border);
+}
+.header-time { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.header-avatar {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: linear-gradient(135deg, #fbbf24, #f97316);
+  color: white; display: flex; align-items: center; justify-content: center;
+  font-weight: 700; cursor: pointer;
+}
+
+/* ========== Sidebar ========== */
+.app-sidebar {
+  grid-area: sidebar;
+  background: var(--card);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  transition: width 0.2s;
+}
+.sidebar-section { padding: 12px 12px; }
+.sidebar-section + .sidebar-section { border-top: 1px solid var(--border-light); }
+.sidebar-title {
+  font-size: 11px; font-weight: 700; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  padding: 6px 10px 8px;
+}
+body[data-sidebar="collapsed"] .sidebar-title,
+body[data-sidebar="collapsed"] .nav-label,
+body[data-sidebar="collapsed"] .new-chat-btn span,
+body[data-sidebar="collapsed"] .sidebar-toggle .toggle-text { display: none; }
+body[data-sidebar="collapsed"] .nav-item { justify-content: center; padding: 10px 0; }
+body[data-sidebar="collapsed"] .new-chat-btn { padding: 10px; justify-content: center; }
+
+.nav-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  cursor: pointer; color: var(--text-secondary); font-weight: 500;
+  font-size: 13.5px;
+  transition: background 0.15s, color 0.15s;
+}
+.nav-item:hover { background: var(--bg-soft); color: var(--text-primary); }
+.nav-item.active { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
+.nav-icon { width: 22px; text-align: center; font-size: 17px; flex-shrink: 0; }
+.nav-badge {
+  margin-left: auto; background: var(--primary); color: white;
+  font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 10px;
+}
+
+.new-chat-btn {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-secondary); font-weight: 600; font-size: 13.5px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.new-chat-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+
+.sidebar-bottom { margin-top: auto; padding: 10px 12px; border-top: 1px solid var(--border-light); }
+.sidebar-toggle {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 8px 10px;
+  border: none; background: transparent;
+  color: var(--text-muted); font-size: 12.5px; cursor: pointer;
+  border-radius: var(--radius-xs);
+}
+.sidebar-toggle:hover { color: var(--text-primary); background: var(--bg-soft); }
+
+/* ========== Main Area ========== */
+.app-main {
+  grid-area: main;
+  display: flex; flex-direction: column;
+  min-height: 0; overflow: hidden;
+  background: var(--bg);
+}
+
+.tab-bar {
+  background: var(--card);
+  padding: 0 28px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 4px;
+  flex-shrink: 0;
+}
+.tab-item {
+  padding: 12px 18px;
+  font-size: 13.5px; font-weight: 600;
+  color: var(--text-muted); cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+  display: flex; align-items: center; gap: 8px;
+  position: relative;
+}
+.tab-item.active { color: var(--primary); border-bottom-color: var(--primary); }
+.tab-item:hover:not(.active) { color: var(--text-primary); }
+.tab-badge {
+  background: var(--primary); color: white;
+  font-size: 10px; font-weight: 700;
+  padding: 1px 7px; border-radius: 8px;
+}
+
+.panel { display: none; flex: 1; overflow: hidden; flex-direction: column; min-height: 0; }
+.panel.active { display: flex; }
+
+.chat-area {
+  flex: 1; overflow-y: auto;
+  padding: 18px 28px 24px;
+  scroll-behavior: smooth;
+}
+.chat-area::-webkit-scrollbar { width: 8px; }
+.chat-area::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }
+
+/* ========== Empty State ========== */
+.empty-state {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  height: 100%; color: var(--text-muted); gap: 14px;
+  padding: 40px 20px;
+}
+.empty-state-icon { font-size: 64px; opacity: 0.45; }
+.empty-state-text { font-size: 18px; font-weight: 600; color: var(--text-secondary); }
+.empty-state-hint { font-size: 13px; opacity: 0.85; max-width: 420px; text-align: center; line-height: 1.6; }
+.empty-state-cards {
+  margin-top: 20px;
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 12px; max-width: 720px; width: 100%;
+}
+.empty-card {
+  background: var(--card); padding: 14px 16px;
+  border-radius: var(--radius-sm); border: 1px solid var(--border-light);
+  cursor: pointer; transition: all 0.15s;
+}
+.empty-card:hover { border-color: var(--primary); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.empty-card-icon { font-size: 20px; margin-bottom: 6px; }
+.empty-card-title { font-size: 13px; font-weight: 700; color: var(--text-primary); margin-bottom: 2px; }
+.empty-card-desc { font-size: 11.5px; color: var(--text-muted); line-height: 1.5; }
+
+/* ========== Clarify Candidates ========== */
+.clarify-section { margin-top: 16px; }
+.clarify-section-title {
+  font-size: 13px; font-weight: 600; color: var(--text-secondary);
+  margin-bottom: 10px; display: flex; align-items: center; gap: 6px;
+}
+.clarify-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+.clarify-card {
+  background: var(--card); border: 1.5px solid var(--border-light);
+  border-radius: var(--radius-sm); padding: 12px 14px;
+  cursor: pointer; transition: all 0.18s;
+}
+.clarify-card:hover {
+  border-color: var(--primary); transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(59,130,246,0.12);
+}
+.clarify-card-hd { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.clarify-card-icon { font-size: 18px; }
+.clarify-card-title { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+.clarify-card-desc { font-size: 11.5px; color: var(--text-muted); line-height: 1.45; margin-bottom: 4px; }
+.clarify-card-hint { font-size: 11px; color: var(--primary); font-style: italic; }
+
+/* ========== Messages ========== */
+.message { display: flex; margin-bottom: 14px; animation: fadeIn 0.25s ease; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+.message-user { justify-content: flex-end; }
+.message-ai { justify-content: flex-start; }
+.msg-avatar {
+  width: 36px; height: 36px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; flex-shrink: 0;
+}
+.message-user .msg-avatar { background: var(--primary); color: white; margin-left: 12px; order: 2; }
+.message-ai .msg-avatar { background: linear-gradient(135deg, var(--primary-dark), var(--primary-light)); color: white; margin-right: 12px; }
+.msg-body { max-width: 92%; min-width: 200px; }
+.message-ai .msg-body { max-width: var(--ai-msg-max-width); }
+.msg-user-bubble {
+  background: var(--primary); color: white;
+  padding: 10px 16px; border-radius: 16px 16px 4px 16px;
+  font-size: 14px; line-height: 1.55;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.18);
+}
+.msg-time { color: var(--text-muted); font-size: 11px; margin-top: 4px; }
+.message-user .msg-time { text-align: right; margin-right: 48px; }
+.message-ai .msg-time { margin-left: 48px; }
+
+/* ========== AI Card (shared shell) ========== */
+.ai-card {
+  background: var(--card); border-radius: var(--radius);
+  box-shadow: var(--shadow-sm); border: 1px solid var(--border-light);
+  overflow: hidden;
+}
+.ai-card-hd {
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--border-light);
+  display: flex; align-items: center; gap: 12px;
+  background: linear-gradient(180deg, var(--bg-soft) 0%, var(--card) 100%);
+}
+.ai-card-hd-icon {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+  background: var(--primary-soft); color: var(--primary);
+}
+.ai-card-hd-title { font-weight: 700; font-size: 15px; color: var(--text-primary); }
+.ai-card-hd-tags { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+.tag {
+  padding: 3px 10px; border-radius: 12px;
+  font-size: 11px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.tag-green { background: var(--green-bg); color: var(--green); }
+.tag-orange { background: var(--orange-bg); color: var(--orange); }
+.tag-red { background: var(--red-bg); color: var(--red); }
+.tag-blue { background: var(--blue-bg); color: var(--blue); }
+.tag-purple { background: var(--purple-bg); color: var(--purple); }
+.tag-clickable {
+  border: none;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.tag-clickable:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.record-highlight {
+  animation: card-glow 1.3s ease;
+}
+@keyframes card-glow {
+  0% { box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.28); border-color: var(--primary-light); }
+  70% { box-shadow: 0 0 0 10px rgba(79, 70, 229, 0); border-color: var(--primary-light); }
+  100% { box-shadow: var(--shadow-sm); border-color: var(--border-light); }
+}
+
+.ai-card-body { padding: 18px 22px; }
+.ai-card-section { padding: 14px 22px; border-top: 1px solid var(--border-light); }
+.ai-card-section-title {
+  font-size: 13px; font-weight: 700;
+  color: var(--text-secondary); margin-bottom: 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+.ai-card-section-title .icon { color: var(--primary); }
+
+.ai-card-ft {
+  padding: 10px 22px;
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: 4px; border-top: 1px solid var(--border-light);
+  background: var(--bg-soft);
+}
+.card-act-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text-muted); cursor: pointer;
+  padding: 6px 12px; border-radius: var(--radius-xs);
+  border: none; background: none; transition: all 0.15s;
+  font-weight: 500;
+}
+.card-act-btn:hover { color: var(--primary); background: var(--primary-soft); }
+
+/* ========== Markdown body ========== */
+.md-body { font-size: 14px; line-height: 1.75; color: var(--text-primary); }
+.md-body h1, .md-body h2, .md-body h3, .md-body h4 { margin: 16px 0 8px; }
+.md-body h1 { font-size: 18px; }
+.md-body h2 { font-size: 16px; }
+.md-body h3 { font-size: 15px; }
+.md-body p { margin: 8px 0; }
+.md-body ul, .md-body ol { padding-left: 22px; margin: 6px 0; }
+.md-body li { margin: 4px 0; }
+.md-body code { background: var(--border-light); padding: 2px 6px; border-radius: 4px; font-size: 12.5px; }
+.md-body pre { background: #0F172A; color: #E2E8F0; padding: 12px 16px; border-radius: var(--radius-sm); overflow-x: auto; margin: 10px 0; font-size: 12.5px; }
+.md-body pre code { background: none; padding: 0; color: inherit; }
+.md-body blockquote {
+  margin: 8px 0; padding: 8px 14px;
+  border-left: 3px solid var(--primary-light); background: var(--bg-soft);
+  color: var(--text-secondary); font-size: 13px; border-radius: 0 8px 8px 0;
+}
+.md-body blockquote p { margin: 2px 0; }
+.md-body img {
+  max-width: 82%; max-height: 300px;
+  border-radius: var(--radius-xs); margin: 10px auto;
+  display: block; border: 1px solid var(--border-light); background: #fff;
+  cursor: zoom-in;
+}
+.md-body img:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.1); }
+.ai-card[data-task-type="kb_retrieval"] .md-body img,
+.ai-card[data-task-type="fault_diagnosis"] .md-body img,
+.ai-card[data-task-type="sql_chart"] .md-body img {
+  max-width: 68%;
+  max-height: 220px;
+}
+.md-body table {
+  border-collapse: collapse; width: 100%; margin: 10px 0;
+  font-size: 13px; border-radius: var(--radius-xs); overflow: hidden;
+}
+.md-body th { background: var(--bg-soft); font-weight: 700; padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+.md-body td { padding: 8px 12px; border-bottom: 1px solid var(--border-light); }
+
+/* ========== Thinking ========== */
+.thinking-ind {
+  display: flex; align-items: center; gap: 12px;
+  padding: 18px 22px; font-size: 13.5px; color: var(--text-secondary);
+}
+.thinking-dots { display: flex; gap: 5px; }
+.thinking-dots span {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--primary);
+  animation: tbounce 1.4s infinite ease-in-out both;
+}
+.thinking-dots span:nth-child(1) { animation-delay: -0.32s; }
+.thinking-dots span:nth-child(2) { animation-delay: -0.16s; }
+@keyframes tbounce { 0%,80%,100%{transform:scale(0);opacity:0.4} 40%{transform:scale(1);opacity:1} }
+
+/* ========== Direct Card ========== */
+.direct-bubble {
+  background: var(--card); padding: 14px 20px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-sm);
+  font-size: 14px; line-height: 1.7;
+}
+
+/* ========== KB Retrieval Card ========== */
+.kb-conclusion {
+  padding: 14px 18px; background: var(--bg-soft);
+  border-radius: var(--radius-sm); border-left: 3px solid var(--primary);
+  margin-bottom: 16px;
+}
+.kb-conclusion-title {
+  font-size: 12px; font-weight: 700; color: var(--primary);
+  margin-bottom: 6px; letter-spacing: 0.04em; text-transform: uppercase;
+}
+.kb-evidence-list { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.kb-evidence-item {
+  display: grid; grid-template-columns: 1fr 108px;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.kb-evidence-item:hover { border-color: var(--primary-light); }
+.kb-evidence-item.no-img { grid-template-columns: 1fr; }
+.kb-evi-text { display: flex; flex-direction: column; min-width: 0; }
+.kb-evi-meta {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 11px; color: var(--text-muted); margin-bottom: 6px;
+}
+.kb-evi-source { font-weight: 600; color: var(--text-secondary); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-evi-score {
+  display: inline-block; padding: 2px 8px;
+  background: var(--green-bg); color: var(--green);
+  font-weight: 700; border-radius: 10px;
+}
+.kb-evi-snippet {
+  font-size: 12.5px; color: var(--text-secondary); line-height: 1.65;
+  display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden;
+}
+.kb-evi-thumb {
+  width: 108px; height: 74px; border-radius: var(--radius-xs);
+  background: var(--bg-soft); overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  cursor: zoom-in;
+}
+.kb-evi-thumb img { width: 100%; height: 100%; object-fit: cover; }
+
+/* ========== SQL Chart Card ========== */
+.metrics-grid {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin-bottom: 14px;
+}
+.metric-card {
+  padding: 14px 16px; border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, #fff 0%, var(--bg-soft) 100%);
+  border: 1px solid var(--border-light);
+  text-align: left;
+}
+.metric-icon {
+  width: 28px; height: 28px;
+  border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 14px; margin-bottom: 8px;
+}
+.metric-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; font-weight: 500; }
+.metric-value {
+  font-size: 22px; font-weight: 800; line-height: 1.1;
+  color: var(--text-primary); font-variant-numeric: tabular-nums;
+}
+.metric-unit { font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-left: 4px; }
+.metric-status {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 10.5px; font-weight: 600; margin-top: 6px;
+}
+.status-normal { background: var(--green-bg); color: var(--green); }
+.status-warning { background: var(--orange-bg); color: var(--orange); }
+.status-danger { background: var(--red-bg); color: var(--red); }
+.status-stable { background: var(--blue-bg); color: var(--blue); }
+.status-info { background: var(--purple-bg); color: var(--purple); }
+
+.chart-card {
+  border: 1px solid var(--border-light); border-radius: var(--radius-sm);
+  overflow: hidden; background: #fff;
+  margin-bottom: 14px;
+}
+.chart-card-hd {
+  padding: 10px 14px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-soft);
+}
+.chart-card-title { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+.chart-card-body { padding: 14px; min-height: 220px; display: flex; align-items: center; justify-content: center; background: #fff; }
+.chart-card-body img { max-width: 100%; max-height: 360px; cursor: zoom-in; border-radius: 4px; }
+.chart-card-empty { color: var(--text-muted); font-size: 13px; padding: 30px; }
+
+.split-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.bullet-card {
+  background: var(--bg-soft); border-radius: var(--radius-sm);
+  padding: 12px 14px; border-left: 3px solid var(--primary-light);
+}
+.bullet-card-title {
+  font-size: 12px; font-weight: 700;
+  color: var(--text-secondary); margin-bottom: 8px;
+  display: flex; align-items: center; gap: 6px;
+}
+.bullet-card ul { padding-left: 18px; font-size: 12.5px; color: var(--text-secondary); line-height: 1.7; }
+.bullet-card li { margin: 3px 0; }
+
+.sql-table-wrap {
+  margin-top: 12px; border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm); overflow: hidden;
+}
+.sql-table-toggle {
+  padding: 10px 14px;
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer; background: var(--bg-soft);
+  font-size: 12.5px; font-weight: 600; color: var(--text-secondary);
+}
+.sql-table-toggle:hover { background: var(--primary-soft); color: var(--primary); }
+.sql-table-scroll { max-height: 320px; overflow: auto; display: none; }
+.sql-table-scroll.open { display: block; }
+.sql-table-scroll table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+}
+.sql-table-scroll th {
+  position: sticky; top: 0; background: var(--bg-soft);
+  padding: 6px 10px; text-align: left; font-weight: 700;
+  color: var(--text-secondary); border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.sql-table-scroll td {
+  padding: 5px 10px; border-bottom: 1px solid var(--border-light);
+  color: var(--text-primary); font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sql-table-scroll tr:hover td { background: var(--bg-soft); }
+
+/* ========== Alarm Card ========== */
+.alarm-banner {
+  padding: 14px 18px; border-radius: var(--radius-sm);
+  display: flex; align-items: center; gap: 14px;
+  margin-bottom: 14px;
+}
+.alarm-banner.sev-red { background: linear-gradient(135deg, #FEE2E2 0%, #FEF2F2 100%); border: 1px solid #FCA5A5; }
+.alarm-banner.sev-orange { background: linear-gradient(135deg, #FEF3C7 0%, #FFFBEB 100%); border: 1px solid #FCD34D; }
+.alarm-banner.sev-blue { background: linear-gradient(135deg, #DBEAFE 0%, #EFF6FF 100%); border: 1px solid #93C5FD; }
+.alarm-banner-icon {
+  width: 42px; height: 42px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; background: rgba(255,255,255,0.7);
+}
+.alarm-banner-text { flex: 1; }
+.alarm-banner-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.alarm-banner-conclusion { font-size: 14.5px; font-weight: 700; color: var(--text-primary); margin-top: 2px; }
+
+.alarm-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.alarm-chip {
+  padding: 6px 12px; border-radius: 14px; font-size: 12px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.chip-charge { background: #DBEAFE; color: #1D4ED8; }
+.chip-discharge { background: #FFEDD5; color: #C2410C; }
+.chip-rest { background: #DCFCE7; color: #15803D; }
+.chip-voltage { background: #FEE2E2; color: #B91C1C; }
+.chip-temp { background: #FEF3C7; color: #B45309; }
+.chip-current { background: #E0E7FF; color: #4338CA; }
+.chip-cap { background: #F3E8FF; color: #7E22CE; }
+.chip-imp { background: #CCFBF1; color: #0F766E; }
+.chip-cons { background: #FCE7F3; color: #BE185D; }
+.alarm-chip-count { background: rgba(255,255,255,0.65); padding: 1px 6px; border-radius: 8px; font-size: 11px; }
+
+.alarm-table-wrap {
+  margin-top: 4px; border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm); overflow: hidden;
+}
+.alarm-table-scroll { max-height: 320px; overflow: auto; }
+.alarm-table-scroll table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.alarm-table-scroll th {
+  position: sticky; top: 0; background: var(--bg-soft); padding: 8px 10px;
+  text-align: left; font-weight: 700; color: var(--text-secondary);
+  border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.alarm-table-scroll td {
+  padding: 7px 10px; border-bottom: 1px solid var(--border-light);
+  color: var(--text-primary); white-space: nowrap;
+}
+.alarm-table-scroll tr:hover td { background: var(--bg-soft); }
+.alarm-sev-tag {
+  display: inline-block; padding: 1px 7px; border-radius: 8px;
+  font-size: 11px; font-weight: 700; min-width: 28px; text-align: center;
+}
+.alarm-sev-tag.sev-high { background: var(--red-bg); color: var(--red); }
+.alarm-sev-tag.sev-mid { background: var(--orange-bg); color: var(--orange); }
+.alarm-sev-tag.sev-low { background: var(--blue-bg); color: var(--blue); }
+
+/* ========== Pipeline mini (in-card) ========== */
+.pipeline-mini { display: flex; flex-direction: column; gap: 6px; }
+.pl-step {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 12.5px; color: var(--text-secondary);
+}
+.pl-step .pl-icon {
+  width: 22px; height: 22px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; flex-shrink: 0;
+}
+.pl-completed .pl-icon { background: var(--green-bg); color: var(--green); }
+.pl-running .pl-icon { background: var(--blue-bg); color: var(--blue); animation: spin 1.5s linear infinite; }
+.pl-pending .pl-icon { background: var(--border-light); color: var(--text-muted); }
+@keyframes spin { 100% { transform: rotate(360deg); } }
+.pl-name { flex: 1; }
+.pl-dur { font-family: monospace; font-size: 11.5px; color: var(--text-muted); }
+
+/* ========== Right Rail ========== */
+.app-rail {
+  grid-area: rail;
+  background: var(--card);
+  border-left: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  transition: width 0.2s;
+  position: relative;
+}
+body[data-rail="hidden"] .app-rail { display: none; }
+.rail-resize-handle {
+  position: absolute;
+  left: -4px; top: 0; bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 5;
+  background: transparent;
+}
+.rail-resize-handle:hover::after,
+body.resizing-rail .rail-resize-handle::after {
+  content: "";
+  position: absolute;
+  left: 3px; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--primary-light);
+  opacity: 0.8;
+}
+
+.rail-hd {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-soft);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.rail-hd-title { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+.rail-hd-meta { font-size: 11px; color: var(--text-muted); }
+
+.rail-tabs {
+  display: flex; gap: 4px; padding: 8px 14px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+.rail-tab {
+  padding: 7px 12px; font-size: 12px; font-weight: 600;
+  color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent;
+  transition: color 0.15s;
+}
+.rail-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+.rail-tab:hover:not(.active) { color: var(--text-primary); }
+
+.rail-body {
+  flex: 1; overflow-y: auto;
+  padding: 14px 14px 24px;
+}
+.rail-empty {
+  text-align: center; padding: 40px 20px;
+  color: var(--text-muted); font-size: 13px;
+}
+.rail-empty-icon { font-size: 32px; opacity: 0.4; margin-bottom: 10px; }
+
+/* Evidence card on rail */
+.ev-card {
+  padding: 12px 14px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.ev-card:hover { border-color: var(--primary-light); }
+.ev-card-hd {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.ev-card-tag {
+  font-size: 10px; font-weight: 700;
+  background: var(--primary-soft); color: var(--primary);
+  padding: 2px 8px; border-radius: 10px;
+}
+.ev-card-score {
+  font-size: 11px; font-weight: 700; color: var(--green);
+}
+.ev-card-source {
+  font-size: 11.5px; font-weight: 600; color: var(--text-primary);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ev-card-snippet {
+  font-size: 11.5px; color: var(--text-secondary); line-height: 1.55;
+  margin-top: 4px;
+  display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
+}
+.ev-card-thumb {
+  margin-top: 8px; width: 100%; max-height: 120px;
+  border-radius: 4px; object-fit: cover; cursor: zoom-in;
+  border: 1px solid var(--border-light); background: #fafafa;
+}
+
+/* Alarm capability rail */
+.cap-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cap-card {
+  padding: 14px 12px; border-radius: var(--radius-sm);
+  text-align: center; border: 1px solid var(--border-light);
+  background: #fff; cursor: pointer; transition: all 0.15s;
+}
+.cap-card:hover { border-color: var(--primary); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.cap-card-icon { font-size: 22px; margin-bottom: 6px; }
+.cap-card-title { font-size: 12px; font-weight: 700; color: var(--text-primary); }
+.cap-card-desc { font-size: 10.5px; color: var(--text-muted); margin-top: 2px; }
+
+/* Diagnosis card on rail */
+.diag-rail-card {
+  padding: 12px 14px; border-radius: var(--radius-sm);
+  background: var(--bg-soft); margin-bottom: 12px;
+  border-left: 3px solid var(--primary);
+}
+.diag-rail-card-title {
+  font-size: 11.5px; font-weight: 700; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;
+}
+.diag-rail-card-body { font-size: 12.5px; color: var(--text-primary); line-height: 1.6; }
+
+/* ========== Logs Panel ========== */
+.log-area {
+  flex: 1; overflow: hidden;
+  padding: 14px 28px 18px;
+  display: flex; gap: 14px;
+}
+.log-timeline-col {
+  width: 320px; flex-shrink: 0;
+  background: var(--card); border-radius: var(--radius);
+  border: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.log-timeline-header {
+  padding: 12px 18px; font-size: 13px; font-weight: 700;
+  border-bottom: 1px solid var(--border); background: var(--bg-soft);
+}
+.log-timeline-body { flex: 1; overflow-y: auto; padding: 10px 14px; }
+.log-detail-col {
+  flex: 1; background: #0F172A;
+  border-radius: var(--radius); overflow: hidden;
+  display: flex; flex-direction: column; min-height: 0;
+}
+.log-detail-header {
+  padding: 12px 18px; font-size: 12.5px; font-weight: 600;
+  background: #0B1220; color: #94A3B8;
+  border-bottom: 1px solid #334155;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.log-detail-body {
+  flex: 1; overflow-y: auto; padding: 12px 18px;
+  font-family: 'SF Mono', 'JetBrains Mono', monospace;
+  font-size: 12px; line-height: 1.65; color: #38BDF8;
+  white-space: pre-wrap; word-break: break-all;
+}
+.log-clear-btn {
+  background: none; border: 1px solid #334155; color: #94A3B8;
+  padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 11px;
+}
+.log-clear-btn:hover { color: white; border-color: #94A3B8; }
+.tl-step {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 0; border-bottom: 1px solid var(--border-light);
+  font-size: 12.5px;
+}
+.tl-step:last-child { border-bottom: none; }
+.tl-icon {
+  width: 24px; height: 24px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; flex-shrink: 0;
+}
+.tl-running .tl-icon { background: var(--blue-bg); color: var(--blue); animation: spin 1.5s linear infinite; }
+.tl-completed .tl-icon { background: var(--green-bg); color: var(--green); }
+.tl-pending .tl-icon { background: var(--border-light); color: var(--text-muted); }
+.tl-name { flex: 1; font-weight: 500; color: var(--text-secondary); }
+.tl-dur { font-family: monospace; font-size: 11px; color: var(--text-muted); }
+.tl-empty { padding: 30px 14px; text-align: center; color: var(--text-muted); font-size: 12.5px; }
+
+/* ========== Mode + Input ========== */
+.composer {
+  background: var(--card); border-top: 1px solid var(--border);
+  padding: 12px 28px 16px; flex-shrink: 0;
+}
+.composer-toolbar {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+  position: relative; flex-wrap: wrap;
+}
+.layout-tuner {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  width: 320px;
+  max-width: 92vw;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 12px 14px;
+  display: none;
+  z-index: 210;
+}
+.layout-tuner.show { display: block; }
+.layout-tuner-hd {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+.range-wrap { margin-bottom: 10px; }
+.range-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.range-val {
+  font-variant-numeric: tabular-nums;
+  color: var(--primary);
+  font-weight: 700;
+}
+.range-wrap input[type="range"] { width: 100%; }
+.layout-tuner-ft {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.mode-toggle {
+  display: inline-flex; background: var(--bg);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 3px; gap: 2px;
+}
+.mode-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px; border-radius: 8px;
+  font-size: 12.5px; font-weight: 600; color: var(--text-muted);
+  border: none; background: transparent; cursor: pointer;
+  transition: all 0.15s;
+}
+.mode-btn.active {
+  background: var(--card); color: var(--primary);
+  box-shadow: var(--shadow-sm);
+}
+.mode-btn-icon { font-size: 14px; }
+
+.examples-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--primary); cursor: pointer;
+  padding: 7px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--primary); background: var(--primary-soft);
+  font-weight: 600; transition: all 0.15s;
+}
+.examples-btn:hover { background: var(--primary); color: white; }
+
+.toolbar-spacer { flex: 1; }
+.toolbar-action {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--card);
+  color: var(--text-secondary); font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s;
+}
+.toolbar-action:hover { border-color: var(--primary); color: var(--primary); }
+.toolbar-action.danger { color: var(--red); border-color: var(--red); }
+.toolbar-action.danger:hover { background: var(--red); color: white; }
+
+.examples-dd {
+  position: absolute; bottom: calc(100% + 8px); left: 0;
+  width: 720px; max-width: 92vw; max-height: 480px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg);
+  z-index: 200; display: none; overflow: hidden;
+  flex-direction: column;
+}
+.examples-dd.show { display: flex; animation: slideUp 0.18s ease; }
+@keyframes slideUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+.examples-dd-hd {
+  padding: 12px 18px; font-size: 13.5px; font-weight: 700;
+  border-bottom: 1px solid var(--border-light);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.examples-dd-close {
+  border: none; background: none; font-size: 18px;
+  color: var(--text-muted); cursor: pointer; padding: 2px 8px; border-radius: 6px;
+}
+.examples-dd-close:hover { color: var(--text-primary); background: var(--border-light); }
+.examples-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+.examples-group-title {
+  padding: 10px 18px 4px; font-size: 11px; font-weight: 700;
+  color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em;
+  background: var(--bg-soft);
+}
+.ex-item {
+  padding: 12px 18px; border-bottom: 1px solid var(--border-light);
+  cursor: pointer; transition: background 0.15s;
+  display: flex; gap: 12px; align-items: flex-start;
+}
+.ex-item:hover { background: var(--primary-soft); }
+.ex-num {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--primary); color: white;
+  font-size: 11.5px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.ex-cat-badge {
+  font-size: 10px; font-weight: 700; color: var(--primary);
+  background: var(--primary-soft); padding: 2px 8px;
+  border-radius: 8px; margin-bottom: 4px; display: inline-block;
+}
+.ex-text { font-size: 13px; color: var(--text-primary); line-height: 1.55; }
+.ex-desc { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+.ex-mode-tag {
+  margin-left: auto; flex-shrink: 0;
+  font-size: 10px; font-weight: 700;
+  padding: 2px 8px; border-radius: 8px;
+}
+
+.composer-row { display: flex; align-items: flex-end; gap: 12px; }
+.composer-input-wrap { flex: 1; position: relative; }
+.composer-input {
+  width: 100%; padding: 12px 80px 12px 16px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  font-size: 14px; font-family: inherit; color: var(--text-primary);
+  resize: none; min-height: 48px; max-height: 140px;
+  line-height: 1.55; outline: none; background: var(--bg-soft);
+  transition: border-color 0.15s, background 0.15s;
+}
+.composer-input:focus { border-color: var(--primary); background: var(--card); }
+.composer-input::placeholder { color: var(--text-muted); }
+.char-counter { position: absolute; right: 14px; bottom: 12px; font-size: 11px; color: var(--text-muted); }
+
+.send-btn {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 28px; border-radius: var(--radius);
+  border: none; background: linear-gradient(135deg, var(--primary-dark), var(--primary-light));
+  color: white; font-size: 14px; font-weight: 700;
+  cursor: pointer; white-space: nowrap;
+  height: 48px;
+  box-shadow: 0 3px 10px rgba(79, 70, 229, 0.32);
+  transition: all 0.15s;
+}
+.send-btn:hover { box-shadow: 0 4px 14px rgba(79, 70, 229, 0.42); transform: translateY(-1px); }
+.send-btn:active { transform: translateY(0); }
+.send-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+/* ========== Image Lightbox ========== */
+.lb-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(15, 17, 21, 0.88);
+  opacity: 0; visibility: hidden;
+  transition: opacity 0.22s ease, visibility 0s linear 0.22s;
+  cursor: zoom-out;
+}
+.lb-overlay.active {
+  opacity: 1; visibility: visible;
+  transition: opacity 0.22s ease, visibility 0s linear 0s;
+}
+.lb-overlay .lb-img {
+  max-width: 92vw; max-height: 92vh;
+  object-fit: contain; border-radius: 6px;
+  box-shadow: 0 12px 60px rgba(0,0,0,0.45);
+  background: #fff; cursor: default;
+  transform: scale(0.96);
+  transition: transform 0.22s ease;
+}
+.lb-overlay.active .lb-img { transform: scale(1); }
+.lb-overlay .lb-close {
+  position: absolute; top: 16px; right: 20px;
+  width: 36px; height: 36px;
+  border: none; border-radius: 50%;
+  background: rgba(255,255,255,0.12);
+  color: #fff; font-size: 22px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, transform 0.15s;
+}
+.lb-overlay .lb-close:hover {
+  background: rgba(255,255,255,0.22);
+  transform: rotate(90deg);
+}
+.lb-overlay .lb-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 40px; height: 40px; border: none; border-radius: 50%;
+  background: rgba(255,255,255,0.10); color: #fff;
+  font-size: 22px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, opacity 0.15s;
+}
+.lb-overlay .lb-nav:hover:not([disabled]) { background: rgba(255,255,255,0.22); }
+.lb-overlay .lb-nav[disabled] { opacity: 0.25; cursor: default; }
+.lb-overlay .lb-prev { left: 22px; }
+.lb-overlay .lb-next { right: 22px; }
+.lb-overlay .lb-counter {
+  position: absolute; top: 18px; left: 22px;
+  color: rgba(255,255,255,0.6); font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.lb-overlay.solo .lb-nav, .lb-overlay.solo .lb-counter { display: none; }
+body.lb-locked { overflow: hidden; }
+
+/* ========== Responsive ========== */
+@media (max-width: 1280px) {
+  :root { --sidebar-width: 200px; --sidebar-collapsed-width: 60px; }
+}
+@media (max-width: 1080px) {
+  body { grid-template-columns: 60px 1fr 0; }
+  body[data-rail="hidden"] { grid-template-columns: 60px 1fr 0; }
+  .nav-label, .sidebar-title, .sidebar-toggle .toggle-text, .new-chat-btn span { display: none; }
+  .nav-item { justify-content: center; padding: 10px 0; }
+  .new-chat-btn { padding: 10px; justify-content: center; }
+  .app-rail { display: none; }
+}
+</style>
+</head>
+<body data-task-type="direct" data-rail="hidden" data-sidebar="expanded">
+
+<!-- ============= Header ============= -->
+<header class="app-header">
+  <div class="brand">
+    <div class="brand-logo"><img src="/figure/kelu-logo.png" alt="科陆电子"></div>
+    <div class="brand-text">
+      <h1>科宝 <span style="color:var(--primary);">Cobot</span></h1>
+      <p>面向储能 / EMS / BMS 场景的智能诊断与研究助手</p>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="status-pill"><span class="status-dot" id="statusDot"></span><span id="statusText">Online</span></div>
+    <div class="status-pill memory">🧠 Session Memory On</div>
+    <div class="header-time" id="headerTime">--:--:--</div>
+    <div class="workspace-select" id="workspaceName">华东储能站点 A</div>
+    <div class="header-avatar">👤</div>
+  </div>
+</header>
+
+<!-- ============= Sidebar ============= -->
+<aside class="app-sidebar">
+  <div class="sidebar-section">
+    <button class="new-chat-btn" onclick="resetChat()">
+      <span style="font-size:16px;">＋</span><span>新建对话</span>
+    </button>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-title">导航</div>
+    <div class="nav-item active" data-nav="chat" onclick="navTo('chat')">
+      <span class="nav-icon">💬</span><span class="nav-label">对话记录</span>
+    </div>
+    <div class="nav-item" data-nav="device" onclick="navTo('device')">
+      <span class="nav-icon">📦</span><span class="nav-label">设备管理</span>
+    </div>
+    <div class="nav-item" data-nav="data" onclick="navTo('data')">
+      <span class="nav-icon">📊</span><span class="nav-label">数据查询</span>
+    </div>
+    <div class="nav-item" data-nav="alarm" onclick="navTo('alarm')">
+      <span class="nav-icon">⚠️</span><span class="nav-label">告警中心</span>
+    </div>
+    <div class="nav-item" data-nav="report" onclick="navTo('report')">
+      <span class="nav-icon">📄</span><span class="nav-label">分析报告</span>
+    </div>
+    <div class="nav-item" data-nav="kb" onclick="navTo('kb')">
+      <span class="nav-icon">📚</span><span class="nav-label">知识库</span>
+    </div>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-title">系统</div>
+    <div class="nav-item" data-nav="settings" onclick="navTo('settings')">
+      <span class="nav-icon">⚙️</span><span class="nav-label">设置中心</span>
+    </div>
+  </div>
+  <div class="sidebar-bottom">
+    <button class="sidebar-toggle" onclick="toggleSidebar()">
+      <span>≡</span><span class="toggle-text">收起侧栏</span>
+    </button>
+  </div>
+</aside>
+
+<!-- ============= Main ============= -->
+<main class="app-main">
+  <div class="tab-bar">
+    <div class="tab-item active" data-tab="chat" onclick="switchTab('chat')">
+      <span>💬</span><span>对话记录</span>
+    </div>
+    <div class="tab-item" data-tab="logs" onclick="switchTab('logs')">
+      <span>📋</span><span>运行日志</span>
+      <span class="tab-badge" id="logBadge" style="display:none;">0</span>
+    </div>
+  </div>
+  <div class="panel active" id="panelChat">
+    <div class="chat-area" id="chatArea">
+      <div class="empty-state" id="emptyState">
+        <div class="empty-state-icon">⚡</div>
+        <div class="empty-state-text">开始您的分析对话</div>
+        <div class="empty-state-hint">输入设备编码、分析目标或告警信息，或点击下方「示例问题清单」选择</div>
+        <div class="empty-state-cards" id="emptyCards"></div>
+      </div>
+    </div>
+  </div>
+  <div class="panel" id="panelLogs">
+    <div class="log-area">
+      <div class="log-timeline-col">
+        <div class="log-timeline-header">⏱️ 执行管线</div>
+        <div class="log-timeline-body" id="logTimelineBody">
+          <div class="tl-empty">暂无执行记录，发送消息后将在此显示各节点耗时</div>
+        </div>
+      </div>
+      <div class="log-detail-col">
+        <div class="log-detail-header">
+          <span>📋 详细运行日志</span>
+          <button class="log-clear-btn" onclick="clearLogs()">清空</button>
+        </div>
+        <div class="log-detail-body" id="logDetailBody">等待任务开始...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Composer (mode bar + input) -->
+  <div class="composer">
+    <div class="composer-toolbar">
+      <div class="mode-toggle">
+        <button class="mode-btn active" id="modeFast" onclick="setMode('fast')">
+          <span class="mode-btn-icon">⚡</span><span>快速模式</span>
+        </button>
+        <button class="mode-btn" id="modeDeep" onclick="setMode('deep')">
+          <span class="mode-btn-icon">🔬</span><span>专家模式</span>
+        </button>
+      </div>
+      <button class="examples-btn" onclick="toggleExamples()">📋 示例问题清单</button>
+      <button class="toolbar-action" onclick="toggleLayoutTuner()">🎛️ 布局调节</button>
+      <div class="examples-dd" id="examplesDropdown">
+        <div class="examples-dd-hd">
+          <span>📋 示例问题清单 — 点击即可填入</span>
+          <button class="examples-dd-close" onclick="toggleExamples()">✕</button>
+        </div>
+        <div class="examples-list" id="examplesList"></div>
+      </div>
+      <div class="layout-tuner" id="layoutTuner">
+        <div class="layout-tuner-hd">布局调节（拖动或滑杆）</div>
+        <div class="range-wrap">
+          <div class="range-row">
+            <span>AI 回答框宽度</span>
+            <span class="range-val" id="aiWidthVal">82%</span>
+          </div>
+          <input type="range" id="aiWidthRange" min="62" max="95" step="1" value="82" oninput="setAiBoxWidth(this.value)">
+        </div>
+        <div class="range-wrap">
+          <div class="range-row">
+            <span>右侧面板宽度</span>
+            <span class="range-val" id="railWidthVal">360px</span>
+          </div>
+          <input type="range" id="railWidthRange" min="280" max="520" step="2" value="360" oninput="setRailWidth(this.value)">
+        </div>
+        <div class="layout-tuner-ft">
+          <button class="toolbar-action" onclick="resetLayoutSize()">恢复默认</button>
+        </div>
+      </div>
+      <div class="toolbar-spacer"></div>
+      <button class="toolbar-action" onclick="copyLatestConclusion()">📋 复制结论</button>
+      <button class="toolbar-action" onclick="downloadReport()">📥 报告下载</button>
+      <button class="toolbar-action danger" onclick="resetChat()">🗑️ 重置对话</button>
+    </div>
+    <div class="composer-row">
+      <div class="composer-input-wrap">
+        <textarea class="composer-input" id="inputField"
+          placeholder="请输入设备编码、分析目标或告警信息..."
+          rows="1" maxlength="2000"
+          onkeydown="handleKeyDown(event)" oninput="updateCharCount()"></textarea>
+        <div class="char-counter" id="charCounter">0 / 2000</div>
+      </div>
+      <button class="send-btn" id="sendBtn" onclick="sendMessage()">
+        <span>✨</span><span>开始分析</span>
+      </button>
+    </div>
+  </div>
+</main>
+
+<!-- ============= Right Rail ============= -->
+<aside class="app-rail" id="appRail">
+  <div class="rail-resize-handle" id="railResizeHandle" title="拖动调整右侧面板宽度"></div>
+  <div class="rail-hd">
+    <div>
+      <div class="rail-hd-title" id="railTitle">证据面板</div>
+      <div class="rail-hd-meta" id="railMeta">实时检索证据 · 图文一体</div>
+    </div>
+  </div>
+  <div class="rail-tabs" id="railTabs"></div>
+  <div class="rail-body" id="railBody">
+    <div class="rail-empty">
+      <div class="rail-empty-icon">📂</div>
+      发送消息后，相关证据将在此呈现
+    </div>
+  </div>
+</aside>
+
+<script>
+// ==========================================
+// Constants
+// ==========================================
+const NODE_NAMES = {
+  'clarify_with_user':       '🔍 意图澄清',
+  'write_draft_report':      '📝 初步分析/计划',
+  'pre_brief_retrieval':     '🔎 深度检索',
+  'solve_simple_task':       '⚡ 快速响应',
+  'supervisor_subgraph':     '🤖 多智能体协作',
+  'final_report_generation': '📄 报告生成',
+  'retrieve_battery_node':   '🔋 数据库诊断',
+  'generate_chart_node':     '📊 绘制图表',
+  'supervisor':              '👀 监督调度',
+  'execute_tools_node':      '🛠️ 工具执行',
+  'single_agent':            '🧠 单智能体',
+  'update_history':          '💾 写入记忆',
+};
+
+const TASK_TYPE_META = {
+  direct: {
+    icon: '💬', title: '通用问答', tag: '直接回答', tagColor: 'blue', railShow: false,
+  },
+  kb_retrieval: {
+    icon: '📚', title: '储能知识库检索', tag: '图文一体证据', tagColor: 'purple', railShow: true,
+    railTitle: '证据面板', railMeta: '图文一体证据片段 · 按相关度排序',
+  },
+  sql_chart: {
+    icon: '📊', title: '设备实时查询', tag: 'SQL+可视化', tagColor: 'blue', railShow: false,
+  },
+  alarm: {
+    icon: '⚠️', title: '异常预警', tag: '告警分析', tagColor: 'orange', railShow: true,
+    railTitle: '告警工具箱', railMeta: '快速复用本次分析能力',
+  },
+  fault_diagnosis: {
+    icon: '🔍', title: '故障钻探', tag: '根因诊断', tagColor: 'red', railShow: true,
+    railTitle: '诊断面板', railMeta: '异常电芯 · 根因分析 · 置信度',
+  },
+  deep_retrieval: {
+    icon: '🧠', title: '深度检索', tag: '深度推理', tagColor: 'purple', railShow: true,
+    railTitle: '证据面板', railMeta: '检索证据 + 多智能体推理',
+  },
+};
+
+const ALARM_CHIP_CLASS = {
+  '充电工况异常': 'chip-charge',
+  '放电工况异常': 'chip-discharge',
+  '静置工况':     'chip-rest',
+  '电压异常':     'chip-voltage',
+  '温度异常':     'chip-temp',
+  '电流异常':     'chip-current',
+  '容量异常':     'chip-cap',
+  '内阻异常':     'chip-imp',
+  '一致性异常':   'chip-cons',
+};
+
+// ==========================================
+// State
+// ==========================================
+let currentMode = 'fast';
+let isRunning = false;
+let eventSource = null;
+let chatMessages = [];
+let logEntries = [];
+let currentSteps = [];
+let exampleQuestions = [];
+let msgCounter = 0;
+// per-card cumulative state captured from SSE
+let cardState = new Map();
+// global last task_type drives right rail
+let activeTaskType = 'direct';
+let activeCardId = null;
+const LAYOUT_PREF_KEY = 'cobot_layout_pref_v1';
+
+// ==========================================
+// Time
+// ==========================================
+function updateTime() {
+  const now = new Date();
+  const p = n => String(n).padStart(2, '0');
+  document.getElementById('headerTime').textContent =
+    `${now.getFullYear()}-${p(now.getMonth()+1)}-${p(now.getDate())} ${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`;
+}
+updateTime(); setInterval(updateTime, 1000);
+
+// ==========================================
+// Tabs / Mode / Sidebar
+// ==========================================
+function switchTab(tab) {
+  document.querySelectorAll('.tab-item').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
+  document.getElementById('panelChat').classList.toggle('active', tab === 'chat');
+  document.getElementById('panelLogs').classList.toggle('active', tab === 'logs');
+}
+function setMode(mode) {
+  currentMode = mode;
+  document.getElementById('modeFast').classList.toggle('active', mode === 'fast');
+  document.getElementById('modeDeep').classList.toggle('active', mode === 'deep');
+}
+function toggleSidebar() {
+  const cur = document.body.dataset.sidebar || 'expanded';
+  document.body.dataset.sidebar = cur === 'expanded' ? 'collapsed' : 'expanded';
+}
+function navTo(target) {
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.nav === target));
+  if (target === 'chat') {
+    switchTab('chat');
+    return;
+  }
+  // 仅 "对话" 路由真实切换；其余项目作为视觉占位 + 提示
+  switchTab('chat');
+  const hint = ({
+    device: '设备管理面板待接入。可在对话中直接查询设备 ID。',
+    data:   '数据查询面板待接入。可在对话中粘贴 BMU/Pack 编号查询时序。',
+    alarm:  '告警中心面板待接入。可在对话中提问 alarm_event 相关问题。',
+    report: '历史报告归档功能待接入。可在右上角下载本次报告。',
+    kb:     '知识库管理面板待接入。可直接提问，系统会自动检索 RAG。',
+    settings:'设置中心待接入。',
+  })[target];
+  if (hint) {
+    setTimeout(() => {
+      document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.nav === 'chat'));
+    }, 1200);
+    showToast(hint);
+  }
+}
+
+let toastTimer = null;
+function showToast(text) {
+  let toast = document.getElementById('appToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'appToast';
+    toast.style.cssText = 'position:fixed;bottom:120px;left:50%;transform:translateX(-50%);background:#1F2937;color:#fff;padding:10px 22px;border-radius:24px;font-size:13px;font-weight:500;z-index:8888;opacity:0;transition:opacity 0.2s;box-shadow:0 6px 20px rgba(0,0,0,0.35);';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = text;
+  toast.style.opacity = '1';
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 2400);
+}
+
+// ==========================================
+// Rail (right side)
+// ==========================================
+function applyTaskType(tt) {
+  activeTaskType = tt || 'direct';
+  document.body.dataset.taskType = activeTaskType;
+  const meta = TASK_TYPE_META[activeTaskType] || TASK_TYPE_META.direct;
+  document.body.dataset.rail = meta.railShow ? 'visible' : 'hidden';
+  if (meta.railShow) renderRail(activeTaskType);
+}
+
+function renderRail(tt) {
+  const titleEl = document.getElementById('railTitle');
+  const metaEl = document.getElementById('railMeta');
+  const tabsEl = document.getElementById('railTabs');
+  const bodyEl = document.getElementById('railBody');
+  const meta = TASK_TYPE_META[tt] || TASK_TYPE_META.kb_retrieval;
+  titleEl.textContent = meta.railTitle || '证据面板';
+  metaEl.textContent = meta.railMeta || '';
+
+  if (tt === 'alarm') {
+    tabsEl.innerHTML = '';
+    bodyEl.innerHTML = renderAlarmCapabilityRail();
+    return;
+  }
+  // kb_retrieval / fault_diagnosis / deep_retrieval: evidence panel
+  const ev = (activeCardId && cardState.get(activeCardId)?.evidence_chunks) || [];
+  const tabs = [
+    { id: 'all', label: '全部', count: ev.length },
+    { id: 'text', label: '文档', count: ev.filter(x => x.kind !== 'image').length },
+    { id: 'image', label: '图片', count: ev.filter(x => (x.image_urls||[]).length > 0).length },
+  ];
+  const activeRailTab = railActiveTab || 'all';
+  tabsEl.innerHTML = tabs.map(t =>
+    `<div class="rail-tab ${t.id===activeRailTab?'active':''}" data-rt="${t.id}" onclick="setRailTab('${t.id}')">${t.label} <span style="opacity:0.6;">(${t.count})</span></div>`
+  ).join('');
+  let filtered = ev;
+  if (activeRailTab === 'text') filtered = ev.filter(x => x.kind !== 'image');
+  if (activeRailTab === 'image') filtered = ev.filter(x => (x.image_urls||[]).length > 0);
+
+  if (tt === 'fault_diagnosis' || tt === 'deep_retrieval') {
+    const cs = (activeCardId && cardState.get(activeCardId)) || {};
+    const summary = cs.diagnosis_summary || '';
+    const tags = cs.diagnosis_tags || [];
+    let topHtml = '';
+    if (summary) {
+      topHtml += `<div class="diag-rail-card"><div class="diag-rail-card-title">推理结论</div><div class="diag-rail-card-body">${esc(summary)}</div></div>`;
+    }
+    if (tags.length) {
+      topHtml += `<div class="diag-rail-card"><div class="diag-rail-card-title">置信度</div><div class="diag-rail-card-body">${tags.map(t=>`<span class="tag tag-${t.color||'blue'}" style="margin-right:4px;">${esc(t.text)}</span>`).join('')}</div></div>`;
+    }
+    bodyEl.innerHTML = topHtml + renderEvidenceList(filtered);
+    return;
+  }
+  bodyEl.innerHTML = renderEvidenceList(filtered);
+}
+
+let railActiveTab = 'all';
+function setRailTab(tab) {
+  railActiveTab = tab;
+  renderRail(activeTaskType);
+}
+
+function renderEvidenceList(list) {
+  if (!list || !list.length) {
+    return '<div class="rail-empty"><div class="rail-empty-icon">📂</div>暂无检索证据，等待 RAG 命中…</div>';
+  }
+  return list.map(ev => {
+    const score = Math.round((Number(ev.score)||0) * 100);
+    const sourceLabel = ev.source_label || ev.source || '';
+    const thumb = (ev.image_urls||[])[0];
+    return `
+      <div class="ev-card" onclick="copyText('${escAttr(ev.chunk_text||'')}')">
+        <div class="ev-card-hd">
+          <span class="ev-card-tag">证据 ${ev.idx} · ${ev.kind === 'image' ? '图片' : '文档'}</span>
+          <span class="ev-card-score">${score}%</span>
+        </div>
+        <div class="ev-card-source" title="${escAttr(ev.source||'')}">📄 ${esc(sourceLabel)}</div>
+        ${ev.chunk_text ? `<div class="ev-card-snippet">${esc(ev.chunk_text)}</div>` : ''}
+        ${thumb ? `<img class="ev-card-thumb" src="${escAttr(thumb)}" alt="evidence">` : ''}
+      </div>`;
+  }).join('');
+}
+
+function renderAlarmCapabilityRail() {
+  const cs = (activeCardId && cardState.get(activeCardId)) || {};
+  const sum = cs.alarm_summary || {};
+  let topHtml = '';
+  if (sum.total) {
+    topHtml += `
+      <div class="diag-rail-card">
+        <div class="diag-rail-card-title">告警概览</div>
+        <div class="diag-rail-card-body">
+          共 <strong>${sum.total}</strong> 条告警 · 涉及 <strong>${sum.cells_involved||0}</strong> 个电芯<br>
+          平均严重度 <strong>${sum.avg_severity||0}</strong> / 最大严重度 <strong>${sum.max_severity||0}</strong>
+        </div>
+      </div>`;
+  }
+  topHtml += `
+    <div class="cap-grid">
+      <div class="cap-card" onclick="reuseQuery('告警归纳')">
+        <div class="cap-card-icon">📋</div>
+        <div class="cap-card-title">告警归纳</div>
+        <div class="cap-card-desc">类型/数量/分布</div>
+      </div>
+      <div class="cap-card" onclick="reuseQuery('类型分析')">
+        <div class="cap-card-icon">🥧</div>
+        <div class="cap-card-title">类型分析</div>
+        <div class="cap-card-desc">关键词聚类</div>
+      </div>
+      <div class="cap-card" onclick="reuseQuery('同期对比')">
+        <div class="cap-card-icon">📈</div>
+        <div class="cap-card-title">同期对比</div>
+        <div class="cap-card-desc">环比/同比</div>
+      </div>
+      <div class="cap-card" onclick="downloadReport()">
+        <div class="cap-card-icon">📄</div>
+        <div class="cap-card-title">报告生成</div>
+        <div class="cap-card-desc">下载本轮报告</div>
+      </div>
+    </div>`;
+  return topHtml;
+}
+
+function reuseQuery(action) {
+  const f = document.getElementById('inputField');
+  const cur = f.value.trim();
+  const ext = cur ? `${cur}\n${action}：` : `请对当前告警进行${action}。`;
+  f.value = ext;
+  updateCharCount();
+  f.focus();
+}
+
+// ==========================================
+// Examples
+// ==========================================
+async function loadExamples() {
+  try {
+    const r = await fetch('/api/examples');
+    const d = await r.json();
+    exampleQuestions = d.questions || [];
+    renderExamples();
+    renderEmptyCards();
+  } catch (e) {
+    console.error('loadExamples failed', e);
+  }
+}
+
+function renderExamples() {
+  const list = document.getElementById('examplesList');
+  if (!exampleQuestions.length) {
+    list.innerHTML = '<div style="padding:30px;color:var(--text-muted);text-align:center;font-size:13px;">暂无示例</div>';
+    return;
+  }
+  // Group by category_id
+  const order = ['direct', 'kb_retrieval', 'sql_chart', 'alarm', 'fault_diagnosis', 'deep_retrieval'];
+  const labelMap = {
+    direct: '通用问答', kb_retrieval: '储能知识库检索', sql_chart: '设备实时查询',
+    alarm: '异常预警', fault_diagnosis: '故障钻探', deep_retrieval: '深度检索',
+  };
+  const groups = {};
+  exampleQuestions.forEach(q => {
+    const cid = q.category_id || 'other';
+    (groups[cid] = groups[cid] || []).push(q);
+  });
+  let html = '';
+  for (const cid of order) {
+    if (!groups[cid]) continue;
+    html += `<div class="examples-group-title">${labelMap[cid] || cid}</div>`;
+    for (const q of groups[cid]) {
+      const idx = exampleQuestions.indexOf(q);
+      const modeTag = q.mode === 'deep'
+        ? '<span class="ex-mode-tag" style="background:var(--purple-bg);color:var(--purple);">🔬 专家</span>'
+        : '<span class="ex-mode-tag" style="background:var(--blue-bg);color:var(--blue);">⚡ 快速</span>';
+      html += `
+        <div class="ex-item" onclick="selectExample(${idx})">
+          <div class="ex-num">${q.id || idx+1}</div>
+          <div style="flex:1;min-width:0;">
+            <span class="ex-cat-badge">${esc(q.category || labelMap[cid] || '')}</span>
+            <div class="ex-text">${esc(q.question)}</div>
+            <div class="ex-desc">${esc(q.description || '')}</div>
+          </div>
+          ${modeTag}
+        </div>`;
+    }
+  }
+  list.innerHTML = html;
+}
+
+function renderEmptyCards() {
+  const root = document.getElementById('emptyCards');
+  if (!root || !exampleQuestions.length) return;
+  // Pick one example per category as a quick-start tile
+  const order = ['direct', 'kb_retrieval', 'sql_chart', 'alarm', 'fault_diagnosis', 'deep_retrieval'];
+  const seen = new Set();
+  const picks = [];
+  for (const q of exampleQuestions) {
+    if (seen.has(q.category_id) || !order.includes(q.category_id)) continue;
+    seen.add(q.category_id);
+    picks.push(q);
+    if (picks.length >= 6) break;
+  }
+  root.innerHTML = picks.map(q => {
+    const meta = TASK_TYPE_META[q.category_id] || TASK_TYPE_META.direct;
+    return `
+      <div class="empty-card" onclick="selectExample(${exampleQuestions.indexOf(q)})">
+        <div class="empty-card-icon">${meta.icon}</div>
+        <div class="empty-card-title">${esc(q.category)}</div>
+        <div class="empty-card-desc">${esc(q.description || q.question)}</div>
+      </div>`;
+  }).join('');
+}
+
+function selectExample(i) {
+  const q = exampleQuestions[i];
+  if (!q) return;
+  document.getElementById('inputField').value = q.question;
+  updateCharCount();
+  toggleExamples();
+  // Auto-toggle deep mode for fault_diagnosis
+  if (q.mode === 'deep') setMode('deep');
+  else if (q.mode === 'fast') setMode('fast');
+  document.getElementById('inputField').focus();
+}
+
+function toggleExamples() {
+  document.getElementById('examplesDropdown').classList.toggle('show');
+}
+document.addEventListener('click', e => {
+  const dd = document.getElementById('examplesDropdown');
+  const lt = document.getElementById('layoutTuner');
+  const ltBtn = Array.from(document.querySelectorAll('.toolbar-action')).find(b => b.textContent.includes('布局调节'));
+  const btn = document.querySelector('.examples-btn');
+  if (dd.classList.contains('show') && !dd.contains(e.target) && !btn.contains(e.target)) {
+    dd.classList.remove('show');
+  }
+  if (lt && lt.classList.contains('show') && !lt.contains(e.target) && !(ltBtn && ltBtn.contains(e.target))) {
+    lt.classList.remove('show');
+  }
+});
+
+function clampNum(v, min, max) {
+  return Math.max(min, Math.min(max, Number(v)));
+}
+
+function saveLayoutPref() {
+  const aiRaw = getComputedStyle(document.documentElement).getPropertyValue('--ai-msg-max-width').trim();
+  const railRaw = getComputedStyle(document.documentElement).getPropertyValue('--rail-width').trim();
+  const ai = parseInt(aiRaw, 10) || 82;
+  const rail = parseInt(railRaw, 10) || 360;
+  try { localStorage.setItem(LAYOUT_PREF_KEY, JSON.stringify({ ai, rail })); } catch (e) {}
+}
+
+function setAiBoxWidth(percent, persist = true) {
+  const val = clampNum(percent, 62, 95);
+  document.documentElement.style.setProperty('--ai-msg-max-width', `${val}%`);
+  const v = document.getElementById('aiWidthVal');
+  if (v) v.textContent = `${val}%`;
+  const r = document.getElementById('aiWidthRange');
+  if (r && Number(r.value) !== val) r.value = String(val);
+  if (persist) saveLayoutPref();
+}
+
+function setRailWidth(px, persist = true) {
+  const val = clampNum(px, 280, 520);
+  document.documentElement.style.setProperty('--rail-width', `${val}px`);
+  const v = document.getElementById('railWidthVal');
+  if (v) v.textContent = `${val}px`;
+  const r = document.getElementById('railWidthRange');
+  if (r && Number(r.value) !== val) r.value = String(val);
+  if (persist) saveLayoutPref();
+}
+
+function resetLayoutSize() {
+  setAiBoxWidth(82, false);
+  setRailWidth(360, false);
+  saveLayoutPref();
+  showToast('已恢复默认布局');
+}
+
+function toggleLayoutTuner() {
+  const el = document.getElementById('layoutTuner');
+  if (!el) return;
+  el.classList.toggle('show');
+}
+
+function initLayoutPref() {
+  let ai = 82;
+  let rail = 360;
+  try {
+    const raw = localStorage.getItem(LAYOUT_PREF_KEY);
+    if (raw) {
+      const obj = JSON.parse(raw);
+      if (obj && obj.ai) ai = obj.ai;
+      if (obj && obj.rail) rail = obj.rail;
+    }
+  } catch (e) {}
+  setAiBoxWidth(ai, false);
+  setRailWidth(rail, false);
+}
+
+function initRailResizeDrag() {
+  const handle = document.getElementById('railResizeHandle');
+  if (!handle) return;
+  let dragging = false;
+  function onMove(ev) {
+    if (!dragging) return;
+    if (document.body.dataset.rail === 'hidden') return;
+    const x = ev.clientX || (ev.touches && ev.touches[0] ? ev.touches[0].clientX : 0);
+    const w = window.innerWidth - x;
+    setRailWidth(w, false);
+  }
+  function onUp() {
+    if (!dragging) return;
+    dragging = false;
+    document.body.classList.remove('resizing-rail');
+    saveLayoutPref();
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+    window.removeEventListener('touchmove', onMove);
+    window.removeEventListener('touchend', onUp);
+  }
+  function onDown(ev) {
+    if (document.body.dataset.rail === 'hidden') return;
+    dragging = true;
+    document.body.classList.add('resizing-rail');
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchmove', onMove, { passive: true });
+    window.addEventListener('touchend', onUp, { passive: true });
+    ev.preventDefault();
+  }
+  handle.addEventListener('mousedown', onDown);
+  handle.addEventListener('touchstart', onDown, { passive: false });
+}
+
+// ==========================================
+// Input
+// ==========================================
+function updateCharCount() {
+  const f = document.getElementById('inputField');
+  document.getElementById('charCounter').textContent = `${f.value.length} / 2000`;
+  f.style.height = 'auto';
+  f.style.height = Math.min(f.scrollHeight, 140) + 'px';
+}
+function handleKeyDown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+
+// ==========================================
+// Logs Timeline
+// ==========================================
+function renderTimeline(steps) {
+  currentSteps = steps || [];
+  const body = document.getElementById('logTimelineBody');
+  if (!steps || !steps.length) {
+    body.innerHTML = '<div class="tl-empty">暂无执行记录</div>';
+    return;
+  }
+  let total = 0;
+  body.innerHTML = steps.map(s => {
+    const cls = s.status === 'completed' ? 'tl-completed' : (s.status === 'running' ? 'tl-running' : 'tl-pending');
+    const icon = s.status === 'completed' ? '✓' : (s.status === 'running' ? '◌' : '○');
+    const dur = s.duration ? s.duration.toFixed(2)+'s' : (s.status === 'running' ? '运行中...' : '—');
+    if (s.duration) total += s.duration;
+    return `<div class="tl-step ${cls}"><div class="tl-icon">${icon}</div><div class="tl-name">${NODE_NAMES[s.name]||s.name}</div><div class="tl-dur">${dur}</div></div>`;
+  }).join('') + `<div class="tl-step" style="border-top:2px solid var(--border);margin-top:8px;padding-top:10px;">
+    <div class="tl-icon" style="background:var(--primary);color:white;font-size:11px;">Σ</div>
+    <div class="tl-name" style="font-weight:700;">总耗时</div>
+    <div class="tl-dur" style="font-weight:700;color:var(--text-primary);">${total.toFixed(2)}s</div></div>`;
+  const badge = document.getElementById('logBadge');
+  badge.style.display = 'inline-block'; badge.textContent = steps.length;
+}
+
+function renderLogs(entries) {
+  const body = document.getElementById('logDetailBody');
+  body.textContent = entries.join('');
+  body.scrollTop = body.scrollHeight;
+}
+function clearLogs() {
+  document.getElementById('logDetailBody').textContent = '';
+  logEntries = [];
+}
+
+// ==========================================
+// Chat: messages
+// ==========================================
+function fmtTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts*1000);
+  const p = n => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function addUserMsg(text) {
+  const ts = Date.now() / 1000;
+  chatMessages.push({ role: 'user', content: text, ts });
+  document.getElementById('emptyState')?.remove();
+  const area = document.getElementById('chatArea');
+  area.insertAdjacentHTML('beforeend', `
+    <div class="message message-user">
+      <div class="msg-avatar">👤</div>
+      <div class="msg-body">
+        <div class="msg-user-bubble">${esc(text)}</div>
+        <div class="msg-time">${fmtTime(ts)}</div>
+      </div>
+    </div>`);
+  scrollBot();
+}
+
+function addAIThinking() {
+  msgCounter++;
+  const mid = 'aiCard_' + msgCounter;
+  activeCardId = mid;
+  cardState.set(mid, {
+    report: '', steps: [], metrics: {}, chart_url: null,
+    diagnosis_tags: [], diagnosis_summary: '',
+    task_type: 'direct', evidence_chunks: [],
+    alarm_rows: [], alarm_summary: {},
+    sql_table: { columns: [], rows: [] },
+    kb_images: [], mode: currentMode,
+  });
+  const area = document.getElementById('chatArea');
+  area.insertAdjacentHTML('beforeend', `
+    <div class="message message-ai" id="aiMsg_${msgCounter}">
+      <div class="msg-avatar">🧠</div>
+      <div class="msg-body">
+        <div class="ai-card" id="${mid}" data-task-type="direct">
+          <div class="ai-card-hd">
+            <div class="ai-card-hd-icon">🔍</div>
+            <div class="ai-card-hd-title">正在分析中...</div>
+            <div class="ai-card-hd-tags">
+              <span class="tag tag-blue">${currentMode === 'deep' ? '专家模式' : '快速模式'}</span>
+            </div>
+          </div>
+          <div class="thinking-ind">
+            <div class="thinking-dots"><span></span><span></span><span></span></div>
+            <span>智能体正在处理您的请求...</span>
+          </div>
+        </div>
+      </div>
+    </div>`);
+  scrollBot();
+  return mid;
+}
+
+// ==========================================
+// AI Card renderers (6 per task_type)
+// ==========================================
+function rerenderCard(cardId) {
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  const cs = cardState.get(cardId) || {};
+  const tt = cs.task_type || 'direct';
+  card.dataset.taskType = tt;
+  const meta = TASK_TYPE_META[tt] || TASK_TYPE_META.direct;
+  const modeTag = `<span class="tag tag-blue">${cs.mode === 'deep' ? '专家模式' : '快速模式'}</span>`;
+  const typeTag = `<button type="button" class="tag tag-${meta.tagColor} tag-clickable" onclick="jumpToTaskType('${tt}','${cardId}')" title="点击定位同类历史记录">${meta.tag}</button>`;
+  const headerH = `
+    <div class="ai-card-hd">
+      <div class="ai-card-hd-icon">${meta.icon}</div>
+      <div class="ai-card-hd-title">${meta.title}</div>
+      <div class="ai-card-hd-tags">${typeTag}${modeTag}</div>
+    </div>`;
+  let bodyH = '';
+  switch (tt) {
+    case 'kb_retrieval':    bodyH = renderKbRetrievalCard(cs); break;
+    case 'sql_chart':       bodyH = renderSqlChartCard(cs); break;
+    case 'alarm':           bodyH = renderAlarmCard(cs); break;
+    case 'fault_diagnosis': bodyH = renderFaultDiagnosisCard(cs); break;
+    case 'deep_retrieval':  bodyH = renderFaultDiagnosisCard(cs); break;
+    default:                bodyH = renderDirectCard(cs);
+  }
+  const footerH = `
+    <div class="ai-card-ft">
+      <button class="card-act-btn" onclick="copyRpt('${cardId}')">📋 复制结论</button>
+      <button class="card-act-btn" onclick="downloadReport()">📥 导出报告</button>
+    </div>`;
+  card.innerHTML = headerH + bodyH + footerH;
+  scrollBot();
+}
+
+function renderDirectCard(cs) {
+  if (!cs.report || !cs.report.trim()) {
+    return `<div class="thinking-ind">
+      <div class="thinking-dots"><span></span><span></span><span></span></div>
+      <span>正在生成回答...</span>
+    </div>`;
+  }
+  let html = `<div class="ai-card-body"><div class="md-body">${renderMd(cs.report)}</div></div>`;
+  html += renderClarifyCandidates(cs);
+  return html;
+}
+
+function renderClarifyCandidates(cs) {
+  const cands = cs.clarify_candidates || [];
+  if (!cands.length) return '';
+  return `
+    <div class="clarify-section">
+      <div class="clarify-section-title">🎯 请选择您要查询的场景</div>
+      <div class="clarify-grid">
+        ${cands.map(c => `
+          <div class="clarify-card" onclick="selectClarifyCandidate('${escAttr(c.id)}','${escAttr(c.title)}','${escAttr(c.hint)}')">
+            <div class="clarify-card-hd">
+              <span class="clarify-card-icon">${c.icon || '🔍'}</span>
+              <span class="clarify-card-title">${esc(c.title)}</span>
+            </div>
+            <div class="clarify-card-desc">${esc(c.desc)}</div>
+            <div class="clarify-card-hint">${esc(c.hint)}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>`;
+}
+
+function selectClarifyCandidate(id, title, hint) {
+  const f = document.getElementById('inputField');
+  f.value = hint;
+  updateCharCount();
+  f.focus();
+  showToast('已选择：' + title + '，请补充信息后发送');
+}
+
+function renderKbRetrievalCard(cs) {
+  let conclusionH = '';
+  if (cs.report && cs.report.trim()) {
+    conclusionH = `
+      <div class="kb-conclusion">
+        <div class="kb-conclusion-title">📌 结论摘要</div>
+        <div class="md-body">${renderMd(cs.report)}</div>
+      </div>`;
+  } else {
+    conclusionH = `<div class="thinking-ind">
+      <div class="thinking-dots"><span></span><span></span><span></span></div>
+      <span>正在检索知识库...</span>
+    </div>`;
+  }
+  let evidenceH = '';
+  const ev = cs.evidence_chunks || [];
+  if (ev.length) {
+    evidenceH = `
+      <div class="ai-card-section">
+        <div class="ai-card-section-title">
+          <span class="icon">🔎</span><span>检索证据 · 图文一体</span>
+          <span style="margin-left:auto;font-weight:500;color:var(--text-muted);font-size:11.5px;">命中 ${ev.length} 条</span>
+        </div>
+        <div class="kb-evidence-list">
+          ${ev.slice(0, 6).map(e => renderKbEvidenceItem(e)).join('')}
+        </div>
+      </div>`;
+  }
+  return `<div class="ai-card-body">${conclusionH}</div>${evidenceH}`;
+}
+
+function renderKbEvidenceItem(e) {
+  const score = Math.round((Number(e.score)||0) * 100);
+  const thumb = (e.image_urls||[])[0];
+  const cls = thumb ? '' : 'no-img';
+  const sourceLabel = e.source_label || e.source || '';
+  return `
+    <div class="kb-evidence-item ${cls}">
+      <div class="kb-evi-text">
+        <div class="kb-evi-meta">
+          <span class="ev-card-tag">证据 ${e.idx}</span>
+          <span class="kb-evi-score">相关度 ${score}%</span>
+          <span class="kb-evi-source" title="${escAttr(e.source||'')}">📄 ${esc(sourceLabel)}</span>
+        </div>
+        <div class="kb-evi-snippet">${esc(e.chunk_text||'')}</div>
+      </div>
+      ${thumb ? `<div class="kb-evi-thumb"><img src="${escAttr(thumb)}" alt="evidence"></div>` : ''}
+    </div>`;
+}
+
+function renderSqlChartCard(cs) {
+  let summaryH = '';
+  if (cs.diagnosis_summary || cs.report) {
+    const text = cs.diagnosis_summary || extractFirstParagraph(cs.report);
+    summaryH = `
+      <div class="kb-conclusion" style="border-left-color:var(--blue);">
+        <div class="kb-conclusion-title" style="color:var(--blue);">📌 分析结论</div>
+        <div class="md-body">${renderMd(text)}</div>
+      </div>`;
+  }
+  let metricsH = renderMetricsGrid(cs);
+  let chartH = '';
+  if (cs.chart_url) {
+    chartH = `
+      <div class="chart-card">
+        <div class="chart-card-hd">
+          <div class="chart-card-title">📊 数据趋势图</div>
+        </div>
+        <div class="chart-card-body"><img src="${escAttr(cs.chart_url)}" alt="chart"></div>
+      </div>`;
+  }
+  let analysisH = '';
+  if (cs.report && cs.report.trim()) {
+    const sections = parseSections(cs.report);
+    if (sections.analysis || sections.conclusion) {
+      analysisH = `
+        <div class="ai-card-section">
+          <div class="ai-card-section-title"><span class="icon">🧩</span><span>逐项分析 / 回答结论</span></div>
+          <div class="split-2">
+            <div class="bullet-card">
+              <div class="bullet-card-title">🧠 逐项分析</div>
+              <div class="md-body">${renderMd(sections.analysis || '暂无分析')}</div>
+            </div>
+            <div class="bullet-card" style="border-left-color:var(--green);">
+              <div class="bullet-card-title">✅ 回答结论</div>
+              <div class="md-body">${renderMd(sections.conclusion || '暂无结论')}</div>
+            </div>
+          </div>
+        </div>`;
+    } else {
+      analysisH = `
+        <div class="ai-card-section">
+          <div class="ai-card-section-title"><span class="icon">📝</span><span>完整说明</span></div>
+          <div class="md-body">${renderMd(cs.report)}</div>
+        </div>`;
+    }
+  } else if (!summaryH) {
+    analysisH = `<div class="ai-card-body"><div class="thinking-ind">
+      <div class="thinking-dots"><span></span><span></span><span></span></div>
+      <span>正在查询数据库 / 生成图表...</span>
+    </div></div>`;
+  }
+  let tableH = '';
+  const tbl = cs.sql_table || {};
+  if (tbl.columns && tbl.columns.length && tbl.rows && tbl.rows.length) {
+    const tableId = 'tbl_' + Math.random().toString(36).slice(2, 8);
+    tableH = `
+      <div class="ai-card-section" style="padding-top:0;">
+        <div class="sql-table-wrap">
+          <div class="sql-table-toggle" onclick="toggleSqlTable('${tableId}')">
+            <span>📋 原始数据表（${tbl.shown||tbl.rows.length} / 共 ${tbl.total||tbl.rows.length} 行）</span>
+            <span id="${tableId}-arrow">▾</span>
+          </div>
+          <div class="sql-table-scroll" id="${tableId}">
+            <table>
+              <thead><tr>${tbl.columns.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+              <tbody>${tbl.rows.slice(0, 200).map(r =>
+                `<tr>${r.map(v => `<td>${esc(formatCell(v))}</td>`).join('')}</tr>`
+              ).join('')}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>`;
+  }
+  let clarifyH = renderClarifyCandidates(cs);
+  return `<div class="ai-card-body">${summaryH}${metricsH}${chartH}</div>${analysisH}${tableH}${clarifyH}`;
+}
+
+function renderMetricsGrid(cs) {
+  const items = [];
+  const m = cs.metrics || {};
+  // Generic SOC/SOH/voltage/temperature/alarm_count from old metrics map
+  if (m.soc !== undefined)         items.push({ icon: '🔋', iconBg: 'var(--green-bg)', iconColor: 'var(--green)',  label: 'SOC',     value: m.soc, unit: '%', status: m.soc < 20 ? 'danger' : (m.soc < 50 ? 'warning' : 'normal'), st: m.soc < 50 ? '异常↑' : '正常' });
+  if (m.soh !== undefined)         items.push({ icon: '✅', iconBg: 'var(--green-bg)', iconColor: 'var(--green)',  label: 'SOH',     value: m.soh, unit: '%', status: m.soh > 80 ? 'normal' : 'warning', st: m.soh > 80 ? '稳定' : '老化' });
+  if (m.voltage !== undefined)     items.push({ icon: '⚡', iconBg: 'var(--blue-bg)',  iconColor: 'var(--blue)',   label: '电压',    value: m.voltage, unit: 'V', status: 'stable', st: '正常' });
+  if (m.temperature !== undefined) items.push({ icon: '🌡️',iconBg: 'var(--orange-bg)',iconColor: 'var(--orange)', label: '温度',    value: m.temperature, unit: '°C', status: m.temperature > 45 ? 'danger' : 'stable', st: m.temperature > 45 ? '过高' : '正常' });
+  // Compute SQL-derived voltage stats if sql_table has voltage column
+  const tbl = cs.sql_table || {};
+  if (tbl.columns && tbl.rows && tbl.rows.length) {
+    const vIdx = tbl.columns.findIndex(c => /^voltage$/i.test(c));
+    if (vIdx >= 0) {
+      const vals = tbl.rows.map(r => Number(r[vIdx])).filter(v => Number.isFinite(v));
+      if (vals.length) {
+        const min = Math.min(...vals), max = Math.max(...vals);
+        const mean = vals.reduce((a,b)=>a+b, 0) / vals.length;
+        const range = max - min;
+        // Replace voltage single-point if present
+        const idxV = items.findIndex(i => i.label === '电压');
+        const voltageRange = { icon: '📐', iconBg: 'var(--blue-bg)', iconColor: 'var(--blue)', label: '电压范围', value: `${min.toFixed(2)}-${max.toFixed(2)}`, unit: 'V', status: 'stable', st: '微幅波动' };
+        const voltageMean  = { icon: '📊', iconBg: 'var(--purple-bg)', iconColor: 'var(--purple)', label: '平均电压', value: mean.toFixed(3), unit: 'V', status: 'info', st: '均值' };
+        const voltageRng   = { icon: '📈', iconBg: 'var(--green-bg)', iconColor: 'var(--green)', label: '波动范围', value: range.toFixed(3), unit: 'V', status: range > 0.1 ? 'warning' : 'normal', st: range > 0.1 ? '波动较大' : '较小' };
+        if (idxV >= 0) items.splice(idxV, 1);
+        items.push(voltageRange, voltageMean, voltageRng);
+      }
+    }
+  }
+  if (!items.length) return '';
+  return `
+    <div class="metrics-grid">
+      ${items.slice(0, 6).map(i => `
+        <div class="metric-card">
+          <div class="metric-icon" style="background:${i.iconBg};color:${i.iconColor};">${i.icon}</div>
+          <div class="metric-label">${esc(i.label)}</div>
+          <div class="metric-value">${esc(String(i.value))}<span class="metric-unit">${esc(i.unit||'')}</span></div>
+          <span class="metric-status status-${i.status}">${esc(i.st||'')}</span>
+        </div>`).join('')}
+    </div>`;
+}
+
+function renderAlarmCard(cs) {
+  const sum = cs.alarm_summary || {};
+  const sevClass = sum.risk_color === 'red' ? 'sev-red' : (sum.risk_color === 'orange' ? 'sev-orange' : 'sev-blue');
+  const conclusion = cs.diagnosis_summary || (sum.total ? `当日共发生 <strong>${sum.total}</strong> 条告警${sum.cells_involved ? `，涉及 <strong>${sum.cells_involved}</strong> 个电芯` : ''}。` : '正在归纳告警…');
+  const bannerH = sum.total ? `
+    <div class="alarm-banner ${sevClass}">
+      <div class="alarm-banner-icon">${sum.risk_color === 'red' ? '🚨' : (sum.risk_color === 'orange' ? '⚠️' : 'ℹ️')}</div>
+      <div class="alarm-banner-text">
+        <div class="alarm-banner-title">📌 诊断结论 · ${esc(sum.risk_label||'')}</div>
+        <div class="alarm-banner-conclusion">${conclusion}</div>
+      </div>
+    </div>` : '';
+
+  // Top metric cards
+  const mItems = sum.total ? [
+    { icon: '🔢', iconBg: 'var(--orange-bg)', iconColor: 'var(--orange)', label: '告警总数', value: sum.total, unit: '条', status: 'warning', st: '关注' },
+    { icon: '🔋', iconBg: 'var(--blue-bg)', iconColor: 'var(--blue)', label: '涉及电芯', value: sum.cells_involved||0, unit: '+', status: 'info', st: '关注' },
+    { icon: '📐', iconBg: 'var(--purple-bg)', iconColor: 'var(--purple)', label: '平均严重度', value: sum.avg_severity||0, unit: '/ 5', status: 'normal', st: '较低' },
+    { icon: '📛', iconBg: 'var(--red-bg)', iconColor: 'var(--red)', label: '最大严重度', value: sum.max_severity||0, unit: '/ 5', status: sum.max_severity >= 4 ? 'danger' : 'warning', st: sum.max_severity >= 4 ? '高风险' : '中风险' },
+    { icon: '🏷️', iconBg: 'var(--green-bg)', iconColor: 'var(--green)', label: '主要异常', value: (sum.top_keywords||[])[0]?.[0] || '—', unit: '', status: 'info', st: '重点关注' },
+  ] : [];
+  const metricsH = mItems.length ? `<div class="metrics-grid" style="grid-template-columns:repeat(5,1fr);">${mItems.map(i => `
+    <div class="metric-card">
+      <div class="metric-icon" style="background:${i.iconBg};color:${i.iconColor};">${i.icon}</div>
+      <div class="metric-label">${esc(i.label)}</div>
+      <div class="metric-value">${esc(String(i.value))}<span class="metric-unit">${esc(i.unit||'')}</span></div>
+      <span class="metric-status status-${i.status}">${esc(i.st||'')}</span>
+    </div>`).join('')}</div>` : '';
+
+  // Chips of categories
+  const chips = (sum.top_keywords || []);
+  const chipsH = chips.length ? `
+    <div class="ai-card-section">
+      <div class="ai-card-section-title"><span class="icon">🏷️</span><span>主要异常类型归纳</span></div>
+      <div class="alarm-chips">
+        ${chips.map(([label, cnt]) => `<span class="alarm-chip ${ALARM_CHIP_CLASS[label] || 'chip-charge'}">${esc(label)}<span class="alarm-chip-count">${cnt}</span></span>`).join('')}
+      </div>
+    </div>` : '';
+
+  // Two-column: 诊断要点 + 建议关注 (parsed from report markdown)
+  let twoColH = '';
+  if (cs.report && cs.report.trim()) {
+    const sec = parseSections(cs.report);
+    twoColH = `
+      <div class="ai-card-section">
+        <div class="ai-card-section-title"><span class="icon">🩺</span><span>诊断要点 / 建议关注</span></div>
+        <div class="split-2">
+          <div class="bullet-card">
+            <div class="bullet-card-title">🔍 诊断要点</div>
+            <div class="md-body">${renderMd(sec.analysis || sec.body || '暂无要点')}</div>
+          </div>
+          <div class="bullet-card" style="border-left-color:var(--green);">
+            <div class="bullet-card-title">💡 建议关注</div>
+            <div class="md-body">${renderMd(sec.conclusion || sec.suggest || '暂无建议')}</div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  // Detail table
+  let tableH = '';
+  const rows = cs.alarm_rows || [];
+  if (rows.length) {
+    const cols = ['start_time', 'bmu_code', 'cell_id', 'severity', 'average_severity', 'summary_cn'];
+    tableH = `
+      <div class="ai-card-section" style="padding-top:0;">
+        <div class="ai-card-section-title"><span class="icon">📋</span><span>告警明细 (Top ${Math.min(rows.length, 50)})</span></div>
+        <div class="alarm-table-wrap">
+          <div class="alarm-table-scroll">
+            <table>
+              <thead><tr>${cols.map(c => `<th>${esc(prettyAlarmCol(c))}</th>`).join('')}</tr></thead>
+              <tbody>${rows.slice(0, 50).map(r => `<tr>${cols.map(c => {
+                if (c === 'severity' || c === 'average_severity') {
+                  const v = Number(r[c]);
+                  if (!Number.isFinite(v)) return '<td>—</td>';
+                  const cls = v >= 4 ? 'sev-high' : (v >= 2 ? 'sev-mid' : 'sev-low');
+                  return `<td><span class="alarm-sev-tag ${cls}">${v.toFixed(2)}</span></td>`;
+                }
+                return `<td>${esc(formatCell(r[c]))}</td>`;
+              }).join('')}</tr>`).join('')}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  if (!sum.total && !cs.report) {
+    return `<div class="ai-card-body"><div class="thinking-ind">
+      <div class="thinking-dots"><span></span><span></span><span></span></div>
+      <span>正在查询告警数据库...</span>
+    </div></div>`;
+  }
+  let clarifyH = renderClarifyCandidates(cs);
+  return `<div class="ai-card-body">${bannerH}${metricsH}</div>${chipsH}${twoColH}${tableH}${clarifyH}`;
+}
+
+function prettyAlarmCol(c) {
+  return ({
+    start_time:'起始时间', end_time:'结束时间', bmu_code:'Pack', cell_id:'电芯',
+    severity:'严重度', average_severity:'平均严重度', summary_cn:'告警摘要',
+    station_code:'站点',
+  })[c] || c;
+}
+
+function renderFaultDiagnosisCard(cs) {
+  let conclusionH = '';
+  if (cs.report && cs.report.trim()) {
+    const sec = parseSections(cs.report);
+    conclusionH = `
+      <div class="kb-conclusion" style="border-left-color:var(--purple);">
+        <div class="kb-conclusion-title" style="color:var(--purple);">🧠 诊断结论与推理</div>
+        <div class="md-body">${renderMd(sec.body || cs.report)}</div>
+      </div>`;
+    if (sec.analysis || sec.conclusion) {
+      conclusionH += `
+        <div class="split-2" style="margin-top:14px;">
+          ${sec.analysis ? `
+            <div class="bullet-card" style="border-left-color:var(--orange);">
+              <div class="bullet-card-title">🔬 推理过程</div>
+              <div class="md-body">${renderMd(sec.analysis)}</div>
+            </div>` : ''}
+          ${sec.conclusion ? `
+            <div class="bullet-card" style="border-left-color:var(--green);">
+              <div class="bullet-card-title">✅ 最终结论</div>
+              <div class="md-body">${renderMd(sec.conclusion)}</div>
+            </div>` : ''}
+        </div>`;
+    }
+  } else {
+    conclusionH = `<div class="thinking-ind">
+      <div class="thinking-dots"><span></span><span></span><span></span></div>
+      <span>多智能体推理进行中... (深度模式)</span>
+    </div>`;
+  }
+
+  let evidenceH = '';
+  const ev = cs.evidence_chunks || [];
+  if (ev.length) {
+    evidenceH = `
+      <div class="ai-card-section">
+        <div class="ai-card-section-title">
+          <span class="icon">🔎</span><span>检索证据 · 图文一体</span>
+          <span style="margin-left:auto;font-weight:500;color:var(--text-muted);font-size:11.5px;">命中 ${ev.length} 条</span>
+        </div>
+        <div class="kb-evidence-list">
+          ${ev.slice(0, 4).map(e => renderKbEvidenceItem(e)).join('')}
+        </div>
+      </div>`;
+  }
+
+  let pipelineH = '';
+  if (cs.steps && cs.steps.length) {
+    let total = 0;
+    pipelineH = `
+      <div class="ai-card-section">
+        <div class="ai-card-section-title"><span class="icon">⏱️</span><span>执行管线</span></div>
+        <div class="pipeline-mini">
+          ${cs.steps.map(s => {
+            const cls = s.status === 'completed' ? 'pl-completed' : (s.status === 'running' ? 'pl-running' : 'pl-pending');
+            const icon = s.status === 'completed' ? '✓' : (s.status === 'running' ? '◌' : '○');
+            const dur = s.duration ? s.duration.toFixed(1)+'s' : (s.status === 'running' ? '...' : '');
+            if (s.duration) total += s.duration;
+            return `<div class="pl-step ${cls}"><div class="pl-icon">${icon}</div><div class="pl-name">${NODE_NAMES[s.name]||s.name}</div><div class="pl-dur">${dur}</div></div>`;
+          }).join('')}
+          <div class="pl-step" style="border-top:1px solid var(--border-light);padding-top:8px;margin-top:4px;">
+            <div class="pl-icon" style="background:var(--primary);color:white;font-size:10px;">Σ</div>
+            <div class="pl-name" style="font-weight:700;">总耗时</div>
+            <div class="pl-dur" style="font-weight:700;color:var(--text-primary);">${total.toFixed(2)}s</div>
+          </div>
+        </div>
+      </div>`;
+  }
+  let clarifyH = renderClarifyCandidates(cs);
+  return `<div class="ai-card-body">${conclusionH}</div>${evidenceH}${pipelineH}${clarifyH}`;
+}
+
+function toggleSqlTable(id) {
+  const el = document.getElementById(id);
+  const arrow = document.getElementById(id + '-arrow');
+  if (!el) return;
+  const open = el.classList.toggle('open');
+  if (arrow) arrow.textContent = open ? '▴' : '▾';
+}
+
+// ==========================================
+// Markdown helpers
+// ==========================================
+function extractFirstParagraph(md) {
+  if (!md) return '';
+  const cleaned = md.trim().replace(/^#+\s+.+$/gm, '').trim();
+  const para = cleaned.split(/\n\n+/)[0];
+  return para || md;
+}
+
+function parseSections(md) {
+  // Heuristic: split markdown by H2 headings
+  if (!md) return { body: md };
+  const out = { body: md };
+  // Common patterns: 分析/结论/建议/推理
+  const matches = [...md.matchAll(/^#{1,3}\s*(.+?)$/gm)];
+  if (!matches.length) return out;
+  const slices = [];
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i];
+    const start = m.index + m[0].length;
+    const end = i + 1 < matches.length ? matches[i+1].index : md.length;
+    slices.push({ title: m[1].trim(), body: md.slice(start, end).trim() });
+  }
+  for (const s of slices) {
+    const t = s.title.toLowerCase();
+    if (/分析|逐项|思路|推理|过程/.test(s.title)) out.analysis = (out.analysis ? out.analysis + '\n\n' : '') + s.body;
+    else if (/结论|回答|总结|判定|断言/.test(s.title)) out.conclusion = (out.conclusion ? out.conclusion + '\n\n' : '') + s.body;
+    else if (/建议|关注|action/.test(t)) out.suggest = s.body;
+  }
+  return out;
+}
+
+// ==========================================
+// Send & SSE
+// ==========================================
+async function sendMessage() {
+  const inp = document.getElementById('inputField');
+  const text = inp.value.trim();
+  if (!text || isRunning) return;
+
+  isRunning = true;
+  document.getElementById('sendBtn').disabled = true;
+  document.getElementById('statusText').textContent = 'Processing...';
+  document.getElementById('statusDot').style.background = 'var(--orange)';
+
+  addUserMsg(text);
+  inp.value = ''; updateCharCount();
+  const cardId = addAIThinking();
+
+  logEntries = [];
+  renderLogs(logEntries);
+  renderTimeline([]);
+
+  try {
+    const resp = await fetch('/api/chat', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message: text, mode: currentMode }),
+    });
+    const data = await resp.json();
+    if (data.status === 'busy') {
+      alert(data.message);
+      isRunning = false; document.getElementById('sendBtn').disabled = false;
+      return;
+    }
+    startSSE(cardId);
+  } catch (err) {
+    console.error(err);
+    isRunning = false; document.getElementById('sendBtn').disabled = false;
+  }
+}
+
+function startSSE(cardId) {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource('/api/stream');
+
+  eventSource.addEventListener('report', e => {
+    const data = JSON.parse(e.data);
+    const cs = cardState.get(cardId) || {};
+    cs.report = data.html || '';
+    cardState.set(cardId, cs);
+    rerenderCard(cardId);
+  });
+  eventSource.addEventListener('timeline', e => {
+    const data = JSON.parse(e.data);
+    const cs = cardState.get(cardId) || {};
+    cs.steps = data.steps || [];
+    cardState.set(cardId, cs);
+    rerenderCard(cardId);
+    renderTimeline(cs.steps);
+  });
+  eventSource.addEventListener('log', e => {
+    const data = JSON.parse(e.data);
+    if (data.entries) {
+      logEntries.push(...data.entries);
+      renderLogs(logEntries);
+    }
+  });
+  eventSource.addEventListener('state', e => {
+    const data = JSON.parse(e.data);
+    const cs = cardState.get(cardId) || {};
+    if (data.metrics) cs.metrics = data.metrics;
+    if (data.chart_url) cs.chart_url = data.chart_url;
+    if (data.diagnosis_tags) cs.diagnosis_tags = data.diagnosis_tags;
+    if (typeof data.diagnosis_summary === 'string') cs.diagnosis_summary = data.diagnosis_summary;
+    if (data.kb_images) cs.kb_images = data.kb_images;
+    if (data.task_type) cs.task_type = data.task_type;
+    if (data.evidence_chunks) cs.evidence_chunks = data.evidence_chunks;
+    if (data.alarm_rows) cs.alarm_rows = data.alarm_rows;
+    if (data.alarm_summary) cs.alarm_summary = data.alarm_summary;
+    if (data.sql_table) cs.sql_table = data.sql_table;
+    if (data.mode) cs.mode = data.mode;
+    if (data.clarify_candidates && data.clarify_candidates.length) cs.clarify_candidates = data.clarify_candidates;
+    cardState.set(cardId, cs);
+    rerenderCard(cardId);
+    if (cardId === activeCardId) {
+      applyTaskType(cs.task_type || 'direct');
+    }
+  });
+  eventSource.addEventListener('complete', () => {
+    eventSource.close(); eventSource = null;
+    isRunning = false;
+    document.getElementById('sendBtn').disabled = false;
+    document.getElementById('statusText').textContent = 'Online';
+    document.getElementById('statusDot').style.background = 'var(--green)';
+    finalizeAI(cardId);
+  });
+  eventSource.onerror = () => {
+    if (eventSource) { eventSource.close(); eventSource = null; }
+    isRunning = false;
+    document.getElementById('sendBtn').disabled = false;
+    document.getElementById('statusText').textContent = 'Online';
+    document.getElementById('statusDot').style.background = 'var(--green)';
+  };
+}
+
+function finalizeAI(cardId) {
+  const cs = cardState.get(cardId) || {};
+  if (cs.report && cs.report.trim()) {
+    chatMessages.push({ role: 'assistant', content: cs.report, ts: Date.now()/1000, task_type: cs.task_type });
+  }
+}
+
+// ==========================================
+// Actions
+// ==========================================
+function downloadReport() { window.open('/api/download', '_blank'); }
+async function resetChat() {
+  if (isRunning) { showToast('请等待当前分析完成后再重置。'); return; }
+  if (!confirm('确定要重置对话吗？所有上下文将清空。')) return;
+  await fetch('/api/reset', { method: 'POST' });
+  chatMessages = []; logEntries = []; currentSteps = []; msgCounter = 0;
+  cardState.clear(); activeCardId = null; activeTaskType = 'direct';
+  applyTaskType('direct');
+  document.getElementById('chatArea').innerHTML = `
+    <div class="empty-state" id="emptyState">
+      <div class="empty-state-icon">⚡</div>
+      <div class="empty-state-text">开始您的分析对话</div>
+      <div class="empty-state-hint">输入设备编码、分析目标或告警信息，或点击下方「示例问题清单」选择</div>
+      <div class="empty-state-cards" id="emptyCards"></div>
+    </div>`;
+  renderEmptyCards();
+  renderLogs([]);
+  renderTimeline([]);
+  document.getElementById('logBadge').style.display = 'none';
+  showToast('已重置对话');
+}
+function copyRpt(cardId) {
+  const cs = cardState.get(cardId);
+  if (!cs || !cs.report) return showToast('暂无可复制的内容');
+  navigator.clipboard.writeText(cs.report).then(() => showToast('已复制结论到剪贴板'));
+}
+
+function getLatestConclusionText() {
+  for (let i = msgCounter; i >= 1; i--) {
+    const cs = cardState.get(`aiCard_${i}`);
+    if (cs && typeof cs.report === 'string' && cs.report.trim()) {
+      return cs.report;
+    }
+  }
+  const last = [...chatMessages].reverse().find(m => m.role === 'assistant' && typeof m.content === 'string' && m.content.trim());
+  return last ? last.content : '';
+}
+
+function copyLatestConclusion() {
+  const text = getLatestConclusionText();
+  if (!text) {
+    showToast('暂无可复制的结论');
+    return;
+  }
+  navigator.clipboard.writeText(text).then(() => showToast('已复制最新结论'));
+}
+
+function copyText(text) {
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => showToast('已复制片段'));
+}
+
+// ==========================================
+// Image Lightbox (kb_images / chart 点击放大)
+// ==========================================
+(() => {
+  let overlay = null;
+  let gallery = [];
+  let cursor = 0;
+
+  function ensure() {
+    if (overlay) return overlay;
+    overlay = document.createElement('div');
+    overlay.className = 'lb-overlay';
+    overlay.innerHTML = `
+      <button class="lb-close" type="button" aria-label="关闭">×</button>
+      <button class="lb-nav lb-prev" type="button" aria-label="上一张">‹</button>
+      <button class="lb-nav lb-next" type="button" aria-label="下一张">›</button>
+      <span class="lb-counter"></span>
+      <img class="lb-img" alt="">`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', ev => {
+      const t = ev.target;
+      if (t.classList.contains('lb-close') || t === overlay) { close(); return; }
+      if (t.classList.contains('lb-prev')) { ev.stopPropagation(); step(-1); return; }
+      if (t.classList.contains('lb-next')) { ev.stopPropagation(); step(1); return; }
+    });
+    return overlay;
+  }
+  function show(i) {
+    if (!gallery.length) return;
+    cursor = Math.max(0, Math.min(gallery.length - 1, i));
+    const ov = ensure();
+    const src = gallery[cursor].currentSrc || gallery[cursor].src;
+    ov.querySelector('.lb-img').src = src;
+    ov.querySelector('.lb-counter').textContent = gallery.length > 1 ? `${cursor + 1} / ${gallery.length}` : '';
+    ov.querySelector('.lb-prev').disabled = cursor === 0;
+    ov.querySelector('.lb-next').disabled = cursor === gallery.length - 1;
+    ov.classList.toggle('solo', gallery.length <= 1);
+  }
+  function step(delta) {
+    const next = cursor + delta;
+    if (next < 0 || next >= gallery.length) return;
+    show(next);
+  }
+  function open(scope, img) {
+    gallery = Array.from(scope.querySelectorAll('img')).filter(i => i !== overlay?.querySelector('.lb-img'));
+    cursor = Math.max(0, gallery.indexOf(img));
+    if (cursor < 0) { gallery = [img]; cursor = 0; }
+    show(cursor);
+    ensure().classList.add('active');
+    document.body.classList.add('lb-locked');
+  }
+  function close() {
+    if (!overlay || !overlay.classList.contains('active')) return;
+    overlay.classList.remove('active');
+    document.body.classList.remove('lb-locked');
+    gallery = [];
+  }
+  document.addEventListener('click', e => {
+    const img = e.target.closest('.md-body img, .kb-evi-thumb img, .ev-card-thumb, .chart-card-body img');
+    if (!img) return;
+    const scope = img.closest('.ai-card, .app-rail') || document.body;
+    open(scope, img);
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  document.addEventListener('keydown', e => {
+    if (!overlay || !overlay.classList.contains('active')) return;
+    if (e.key === 'Escape')      { close(); return; }
+    if (e.key === 'ArrowLeft')   { step(-1); e.preventDefault(); }
+    if (e.key === 'ArrowRight')  { step(1);  e.preventDefault(); }
+  });
+})();
+
+// ==========================================
+// Helpers
+// ==========================================
+function esc(t) {
+  const d = document.createElement('div');
+  d.textContent = (t === null || t === undefined) ? '' : String(t);
+  return d.innerHTML;
+}
+function escAttr(t) { return esc(t).replace(/'/g, '&#39;').replace(/"/g, '&quot;'); }
+function renderMd(t) {
+  if (!t) return '';
+  try {
+    if (typeof marked !== 'undefined') {
+      marked.setOptions({ breaks: true, gfm: true });
+      return marked.parse(t);
+    }
+  } catch (e) {}
+  return esc(t).replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+}
+function scrollBot() {
+  const a = document.getElementById('chatArea');
+  requestAnimationFrame(() => { a.scrollTop = a.scrollHeight; });
+}
+function formatCell(v) {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'number') return Number.isFinite(v) ? (Number.isInteger(v) ? v.toString() : v.toFixed(3).replace(/\.?0+$/, '')) : String(v);
+  return String(v);
+}
+
+function jumpToTaskType(taskType, currentCardId) {
+  const selector = `.ai-card[data-task-type="${taskType}"]`;
+  const cards = Array.from(document.querySelectorAll(selector));
+  if (!cards.length) {
+    showToast('未找到同类历史记录');
+    return;
+  }
+  switchTab('chat');
+  const current = currentCardId ? document.getElementById(currentCardId) : null;
+  let target = cards[0];
+  if (current) {
+    const idx = cards.findIndex(c => c.id === current.id);
+    if (idx > 0) target = cards[idx - 1];
+    else if (idx === 0 && cards.length > 1) target = cards[cards.length - 1];
+  }
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  target.classList.add('record-highlight');
+  window.setTimeout(() => target.classList.remove('record-highlight'), 1400);
+  showToast(`已定位到${TASK_TYPE_META[taskType]?.tag || '同类'}记录（共 ${cards.length} 条）`);
+}
+
+// ==========================================
+// History
+// ==========================================
+async function loadHistory() {
+  try {
+    const r = await fetch('/api/history');
+    const d = await r.json();
+    if (d.history && d.history.length) {
+      document.getElementById('emptyState')?.remove();
+      for (const msg of d.history) {
+        if (msg.role === 'user') addUserMsg(msg.content);
+        else if (msg.role === 'assistant') {
+          const area = document.getElementById('chatArea');
+          area.insertAdjacentHTML('beforeend', `
+            <div class="message message-ai">
+              <div class="msg-avatar">🧠</div>
+              <div class="msg-body">
+                <div class="ai-card"><div class="ai-card-body"><div class="md-body">${renderMd(msg.content)}</div></div></div>
+                <div class="msg-time">${fmtTime(msg.ts)}</div>
+              </div>
+            </div>`);
+        }
+      }
+      scrollBot();
+    }
+  } catch (e) {}
+}
+
+loadHistory();
+loadExamples();
+initLayoutPref();
+initRailResizeDrag();
+applyTaskType('direct');
+</script>
+</body>
+</html>

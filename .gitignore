@@ -1,0 +1,48 @@
+# Large data and generated outputs
+rag_data/
+rag_data——备份/
+rag_output_all_md/
+rag_output_plan_md/
+知识库构建数据/
+_append_backup/
+
+# Models / finetune artifacts
+fintune/
+
+# Local runtime
+dbdata/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Archives redundant with repo
+deep_research.zip
+
+# Secrets and local env
+.env
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# IDE / tooling
+.cursor/
+.ipynb_checkpoints/
+.gradio/
+.npm-cache/
+
+# uv (optional lock can stay tracked — keep lock; ignore cache if present)
+.uv/

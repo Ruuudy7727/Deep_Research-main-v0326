@@ -1,0 +1,49 @@
+{
+  "name": "generate_path_map",
+  "description": "Generate a route map to display the user's planned route, such as travel guide routes.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "description": "The map title should not exceed 16 characters. The content should be consistent with the information the map wants to convey and should be accurate, rich, creative, and attractive."
+      },
+      "data": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "description": "A list of keywords for the names of points of interest (POIs) in Chinese. These POIs usually contain a group of places with similar locations, so the names should be more descriptive, must adding attributives to indicate that they are different places in the same area, such as \"\u5317\u4eac\u5e02\" is better than \"\u5317\u4eac\", \"\u676d\u5dde\u897f\u6e56\" is better than \"\u897f\u6e56\"; in addition, if you can determine that a location may appear in multiple areas, you can be more specific, such as \"\u676d\u5dde\u897f\u6e56\u7684\u82cf\u5824\u6625\u6653\" is better than \"\u82cf\u5824\u6625\u6653\". The tool will use these keywords to search for specific POIs and query their detailed data, such as latitude and longitude, location photos, etc. For example, [\"\u897f\u5b89\u949f\u697c\", \"\u897f\u5b89\u5927\u5510\u4e0d\u591c\u57ce\", \"\u897f\u5b89\u5927\u96c1\u5854\"]."
+            }
+          },
+          "required": ["data"],
+          "description": "The route and places along it."
+        },
+        "minItems": 1,
+        "description": "Routes, each group represents all POIs along a route. For example, [{ \"data\": [\"\u897f\u5b89\u949f\u697c\", \"\u897f\u5b89\u5927\u5510\u4e0d\u591c\u57ce\", \"\u897f\u5b89\u5927\u96c1\u5854\"] }, { \"data\": [\"\u897f\u5b89\u66f2\u6c5f\u6c60\u516c\u56ed\", \"\u897f\u5b89\u56de\u6c11\u8857\"] }]"
+      },
+      "width": {
+        "type": "number",
+        "default": 1600,
+        "description": "Set the width of map, default is 1600."
+      },
+      "height": {
+        "type": "number",
+        "default": 1000,
+        "description": "Set the height of map, default is 1000."
+      }
+    },
+    "required": ["title", "data"],
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "annotations": {
+    "title": "Generate Path Map",
+    "readOnlyHint": true
+  }
+}

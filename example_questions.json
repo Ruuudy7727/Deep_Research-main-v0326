@@ -1,0 +1,130 @@
+[
+  {
+    "id": 1,
+    "category_id": "direct",
+    "category": "通用问答",
+    "mode": "fast",
+    "question": "请自我介绍",
+    "description": "直接回答，了解系统能力边界"
+  },
+  {
+    "id": 2,
+    "category_id": "direct",
+    "category": "通用问答",
+    "mode": "fast",
+    "question": "科陆公司介绍",
+    "description": "直接回答，公司背景信息"
+  },
+  {
+    "id": 3,
+    "category_id": "kb_retrieval",
+    "category": "储能知识库检索",
+    "mode": "fast",
+    "question": "热解粒子传感器试验设备介绍",
+    "description": "概念性知识库 · 图文一体证据"
+  },
+  {
+    "id": 4,
+    "category_id": "kb_retrieval",
+    "category": "储能知识库检索",
+    "mode": "fast",
+    "question": "耐湿热实验有哪些步骤?",
+    "description": "操作流程检索 · 步骤+插图"
+  },
+  {
+    "id": 5,
+    "category_id": "kb_retrieval",
+    "category": "储能知识库检索",
+    "mode": "fast",
+    "question": "电站运维实际碰到的情况都有哪些",
+    "description": "案例知识库 · 多文档汇总"
+  },
+  {
+    "id": 6,
+    "category_id": "sql_chart",
+    "category": "设备实时查询",
+    "mode": "fast",
+    "question": "查询 BMS（bmu_code=00012001001001017）在 2025-03-18 16:30 到 17:00 的 SOC、SOH 和电压变化，并绘制该时段电压随时间变化的折线图",
+    "description": "SQL 查询 + MCP-Chart 可视化"
+  },
+  {
+    "id": 7,
+    "category_id": "alarm",
+    "category": "异常预警",
+    "mode": "fast",
+    "question": "给我 pack-7 最近2026年3月22日的 summary_cn 里高频异常关键词和重复模式",
+    "description": "alarm_event · 高频关键词分析"
+  },
+  {
+    "id": 8,
+    "category_id": "alarm",
+    "category": "异常预警",
+    "mode": "fast",
+    "question": "pack-7 在 2026-04-18 当天有哪些告警？请从 summary_cn 里归纳主要异常类型",
+    "description": "alarm_event · 类型归纳"
+  },
+  {
+    "id": 9,
+    "category_id": "alarm",
+    "category": "异常预警",
+    "mode": "fast",
+    "question": "站 00256 下 pack-3 在 2026-03-22 一天的告警里，平均严重度最高的是哪几条（看 average_severity）？",
+    "description": "alarm_event · 严重度排序"
+  },
+  {
+    "id": 10,
+    "category_id": "fault_diagnosis",
+    "category": "故障钻探",
+    "mode": "fast",
+    "question": "找出2026年3月的00256006001009006pack之下内阻异常超过5天的电芯数据",
+    "description": "dcr_abnormal_cells · 内阻异常电芯"
+  },
+  {
+    "id": 11,
+    "category_id": "fault_diagnosis",
+    "category": "故障钻探",
+    "mode": "fast",
+    "question": "列出 bmu_code='00256001001001001' 且 2026 年 3 月滑窗内 microshort_score 高于 0.6 的电芯，按分降序",
+    "description": "isc_score_result · ISC 评分筛选"
+  },
+  {
+    "id": 12,
+    "category_id": "fault_diagnosis",
+    "category": "故障钻探",
+    "mode": "fast",
+    "question": "BMU 00256001001004002 里，电芯 31 容量不一致的异常原因、方向、置信度分别是什么？首次与最近一次判定时间各是什么时候？",
+    "description": "capacity_inconsistent_cells · 容量不一致"
+  },
+  {
+    "id": 13,
+    "category_id": "deep_retrieval",
+    "category": "深度检索",
+    "mode": "deep",
+    "question": "在分析电压数据时，有些电芯并不是全程充电电压偏高(偏低)，放电电压偏低(偏高)，例如：在磷酸铁锂-石墨电池包里，电池串联，电芯2充电<80%SOC电压最低，>80%SOC正常；放电电压全程最高，电芯2的故障是什么？",
+    "description": "深度推理 · 图文证据 · 多智能体"
+  },
+  {
+    "id": 14,
+    "category_id": "deep_retrieval",
+    "category": "深度检索",
+    "mode": "deep",
+    "question": "在磷酸铁锂-石墨电池包中，电池串联，某电芯充电过程全程最低，电压放电过程由最高变化到最低，放电>20%SOC最高，<20%SOC电压最低，放电后的静置过程中电压也是最低，但充电后静置过程中电压排名会升高。此外，该电池的阻抗在整个电池包中最小，其阻抗值波动性最大。该电芯可能发生了什么故障？",
+    "description": "深度推理 · 多模态证据"
+  },
+  {
+    "id": 15,
+    "category_id": "deep_retrieval",
+    "category": "深度检索",
+    "mode": "deep",
+    "question": "在磷酸铁锂-石墨电池包中，电池串联，某电芯放电全程偏低，充电<80%SOC偏高，>80%SOC正常。且该电芯的内阻偏大。该电池是什么故障？",
+    "description": "深度推理 · 经典阻抗故障"
+  },
+  {
+    "id": 16,
+    "category_id": "deep_retrieval",
+    "category": "深度检索",
+    "mode": "deep",
+    "question": "在磷酸铁锂-石墨电池包中，电池串联，某电芯充电<80%SOC正常，>80%SOC偏高，放电全程正常。且该电池阻抗中等。该电芯是什么故障？",
+    "description": "深度推理 · 阻抗中等场景"
+  }
+]
