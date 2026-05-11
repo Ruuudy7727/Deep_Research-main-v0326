@@ -181,7 +181,7 @@ def _compose_report_with_chart(report_text: str, chart_path: Optional[str]) -> s
 
 def _img_caption_line(img: Dict[str, Any], idx: int) -> str:
     """为某张图生成一行"图 N ｜ 来源: ..."形式的小注释。"""
-    source = (img.get("source") or "").strip()
+    source = str(img.get("source_label") or img.get("source") or "").strip()
     bits = [f"_图 {idx}_"]
     if source:
         bits.append(f"来源: `{source}`")
@@ -663,6 +663,114 @@ def _to_relative_source_path(raw_source: Any) -> str:
     return s.lstrip("./")
 
 
+def _to_source_display_name(raw_source: Any) -> str:
+    """前端来源显示名：仅保留最后文档名（兼容 / \\ ／ 分隔符）。"""
+    s = str(raw_source or "").strip()
+    if not s:
+        return ""
+    parts = [p for p in re.split(r"[\\/／]+", s) if p]
+    return parts[-1] if parts else s
+
+
+# =============================================================================
+# 图片单独召回（图文双路检索）
+# -----------------------------------------------------------------------------
+# 文本召回归文本，图片召回归图片：用同一条 query 在向量库里做大 k 召回，
+# 然后从结果里**只挑带 image_paths 的 chunk**，作为"语义最相关的图片证据"。
+# 这样不会再出现"段落相邻但语义不相关"的图。
+# =============================================================================
+# 每次最多挑出多少张"语义最相关"的图片证据
+IMAGE_RECALL_TOPK = int(os.getenv("IMAGE_RECALL_TOPK", "2"))
+# 用多大的候选池来扫描（只看带 image_paths 的 chunk，所以池要足够大才能命中）
+IMAGE_RECALL_POOL_K = int(os.getenv("IMAGE_RECALL_POOL_K", "30"))
+
+
+def _image_recall_for_query_sync(query: str) -> List[Dict[str, Any]]:
+    """在向量库里按 query 单独召回"带图 chunk"，返回 top-N 图片元数据列表。
+
+    注意：monkey-patch 的 `_wrapped_vss` 会按 (query, k) 缓存调用结果，所以同 query
+    多次调用只会真正打一次 embedding API。
+    """
+    if not query or not str(query).strip():
+        return []
+    vdb = getattr(dr_utils, "vectordb_instance", None)
+    if vdb is None:
+        return []
+    try:
+        raw = vdb.similarity_search_with_score(query, k=IMAGE_RECALL_POOL_K)
+    except Exception as e:
+        print(f"[Image-Recall] vss failed: {e}", flush=True)
+        return []
+    out: List[Dict[str, Any]] = []
+    for doc, dist in raw or []:
+        meta = dict(getattr(doc, "metadata", None) or {})
+        rels = _norm_image_paths_field(meta.get("image_paths"))
+        if not rels:
+            continue
+        content = (getattr(doc, "page_content", "") or "").strip().replace("\n", " ")
+        caption = content[:160] + ("..." if len(content) > 160 else "")
+        source_full = _to_relative_source_path(meta.get("file_path") or meta.get("source") or "")
+        source_label = _to_source_display_name(source_full)
+        sim = 1.0 - float(dist)
+        for rel in rels:
+            if not _kb_image_exists(rel):
+                continue
+            out.append({
+                "rel": rel,
+                "caption": caption,
+                "source": source_full,
+                "source_label": source_label,
+                "score": sim,
+            })
+        if len(out) >= IMAGE_RECALL_TOPK:
+            break
+    return out[:IMAGE_RECALL_TOPK]
+
+
+async def _image_recall_for_query_async(query: str) -> List[Dict[str, Any]]:
+    return await asyncio.to_thread(_image_recall_for_query_sync, query)
+
+
+def _add_images_to_bucket(items: List[Dict[str, Any]]) -> int:
+    """把 `_image_recall_for_query_*` 给出的图片合并进 SHARED_STATE['retrieved_images']。
+
+    去重以 url 为键；超出 `MAX_RETRIEVED_IMAGES` 时停止追加。
+    """
+    if not items:
+        return 0
+    bucket: List[Dict[str, Any]] = list(SHARED_STATE.get("retrieved_images") or [])
+    seen = {it.get("url") for it in bucket if isinstance(it, dict)}
+    added = 0
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        rel = str(it.get("rel") or "").strip()
+        if not rel or not _kb_image_exists(rel):
+            continue
+        url = _kb_image_url(rel)
+        if url in seen:
+            continue
+        seen.add(url)
+        src_full = str(it.get("source") or "").strip()
+        src_label = str(it.get("source_label") or _to_source_display_name(src_full)).strip()
+        bucket.append({
+            "url": url,
+            "rel": rel,
+            "caption": it.get("caption", ""),
+            "source": src_full,
+            "source_label": src_label,
+            "score": float(it.get("score") or 0.0),
+        })
+        if src_full:
+            print(f"[RAG-SOURCE] image source: '{src_full}' -> '{src_label}'", flush=True)
+        added += 1
+        if len(bucket) >= MAX_RETRIEVED_IMAGES:
+            break
+    if added:
+        SHARED_STATE["retrieved_images"] = bucket
+    return added
+
+
 def _record_retrieved_images_from_results(results: List[Dict[str, Any]]) -> int:
     """从 `unified_local_search` 命中结果中提取 image_paths 写入 SHARED_STATE。
 
@@ -680,10 +788,12 @@ def _record_retrieved_images_from_results(results: List[Dict[str, Any]]) -> int:
         meta = item.get("metadata") or {}
         rels = _norm_image_paths_field(meta.get("image_paths"))
         if not rels:
+            # 命中 chunk 自身没图就跳过；"语义相关的图"由 _image_recall_for_query_* 单独召回补齐。
             continue
         content = str(item.get("content") or "").strip().replace("\n", " ")
         caption = content[:160] + ("..." if len(content) > 160 else "")
-        source = _to_relative_source_path(meta.get("file_path") or meta.get("source") or "")
+        source_full = _to_relative_source_path(meta.get("file_path") or meta.get("source") or "")
+        source_label = _to_source_display_name(source_full)
         score = float(meta.get("score") or 0.0)
         for rel in rels:
             if not _kb_image_exists(rel):
@@ -696,9 +806,12 @@ def _record_retrieved_images_from_results(results: List[Dict[str, Any]]) -> int:
                 "url": url,
                 "rel": rel,
                 "caption": caption,
-                "source": source,
+                "source": source_full,
+                "source_label": source_label,
                 "score": score,
             })
+            if source_full:
+                print(f"[RAG-SOURCE] image source: '{source_full}' -> '{source_label}'", flush=True)
             added += 1
             if len(bucket) >= MAX_RETRIEVED_IMAGES:
                 break
@@ -733,9 +846,10 @@ def _record_evidence_chunks_from_results(query: str, results: List[Dict[str, Any
             continue
         chunk_text = content if len(content) <= 800 else content[:800] + "..."
         source = _to_relative_source_path(meta.get("file_path") or meta.get("source") or "unknown")
-        # 证据面板按需求显示相对路径，不再展示绝对路径
-        source_label = source or "unknown"
+        source_label = _to_source_display_name(source) or "unknown"
         score = float(meta.get("score") or 0.0)
+        # 右侧"证据面板"里每条 chunk 的缩略图严格使用该 chunk 自挂的 image_paths（保证关联性），
+        # 不再用邻近/同文档兜底。
         rels = _norm_image_paths_field(meta.get("image_paths"))
         rels_existing = [r for r in rels if _kb_image_exists(r)]
         urls = [_kb_image_url(r) for r in rels_existing]
@@ -757,6 +871,8 @@ def _record_evidence_chunks_from_results(query: str, results: List[Dict[str, Any
             "query": str(query or "")[:120],
             "content_hash": content_hash,
         })
+        if source:
+            print(f"[RAG-SOURCE] evidence source: '{source}' -> '{source_label}'", flush=True)
         added += 1
         if len(bucket) >= MAX_EVIDENCE_CHUNKS:
             break
@@ -835,10 +951,18 @@ def _install_rag_image_capture_patch() -> None:
             try:
                 added_img = _record_retrieved_images_from_results(results or [])
                 added_chunks = _record_evidence_chunks_from_results(query, results or [])
-                if added_img or added_chunks:
+                # 图片单独召回：从向量库中按 query 直接挑"语义最相关的带图 chunk"，
+                # 不依赖文本召回 top-k 是否恰好命中带图段落。
+                added_img2 = 0
+                try:
+                    extra = await _image_recall_for_query_async(query)
+                    added_img2 = _add_images_to_bucket(extra)
+                except Exception as ir_err:
+                    print(f"[RAG-CAPTURE] image-recall failed: {ir_err}", flush=True)
+                if added_img or added_img2 or added_chunks:
                     print(
-                        f"[RAG-CAPTURE] +{added_img} image(s), +{added_chunks} chunk(s) "
-                        f"for query='{str(query)[:40]}'",
+                        f"[RAG-CAPTURE] +{added_img} image(s) (hit), +{added_img2} image(s) (semantic), "
+                        f"+{added_chunks} chunk(s) for query='{str(query)[:40]}'",
                         flush=True,
                     )
             except Exception as cap_err:
@@ -857,10 +981,17 @@ def _install_rag_image_capture_patch() -> None:
                 try:
                     added_img = _record_retrieved_images_from_results(results or [])
                     added_chunks = _record_evidence_chunks_from_results(query, results or [])
-                    if added_img or added_chunks:
+                    # 同 _patched_unified：在深度模式下也跑一次"图片单独召回"。
+                    added_img2 = 0
+                    try:
+                        extra = _image_recall_for_query_sync(query)
+                        added_img2 = _add_images_to_bucket(extra)
+                    except Exception as ir_err:
+                        print(f"[RAG-CAPTURE-SYNC] image-recall failed: {ir_err}", flush=True)
+                    if added_img or added_img2 or added_chunks:
                         print(
-                            f"[RAG-CAPTURE-SYNC] +{added_img} image(s), +{added_chunks} chunk(s) "
-                            f"for query='{str(query)[:40]}'",
+                            f"[RAG-CAPTURE-SYNC] +{added_img} image(s) (hit), +{added_img2} image(s) (semantic), "
+                            f"+{added_chunks} chunk(s) for query='{str(query)[:40]}'",
                             flush=True,
                         )
                 except Exception as cap_err:
