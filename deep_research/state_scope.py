@@ -88,9 +88,9 @@ class AgentState(TypedDict, total=False):
     supervisor_route: Annotated[str, overwrite]
     # Supervisor 提取出的参数，供下游工具节点直接复用
     supervisor_params: Annotated[Dict[str, Any], overwrite]
-    # 前端展示分类：direct / kb_retrieval / sql_chart / alarm / fault_diagnosis
+    # 前端展示分类：direct / kb_retrieval / station_device_td / alerting / troubleshooting / deep_research
     # 由 supervisor 路由 LLM 显式输出，或在缺失时由 _infer_task_type 推断；
-    # 深度研究分支会被强制覆盖为 fault_diagnosis。
+    # 深度研究分支会被强制覆盖为 deep_research。
     task_type: Annotated[str, overwrite]
 
     # === 工具输出字段 ===

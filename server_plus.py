@@ -22,10 +22,11 @@ import requests
 import base64
 import mimetypes
 import re
+import tempfile
 from typing import List, Dict, Any, Tuple, Optional
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, File, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -78,7 +79,7 @@ SHARED_STATE: Dict[str, Any] = {
     "answer_images": [],
     # --- 6 类前端布局支持（Plus v2）---
     # 由 supervisor / clarify_with_user 写入；前端据此切换展示卡片。
-    # 取值：direct / kb_retrieval / sql_chart / alarm / fault_diagnosis / deep_retrieval
+    # 取值：direct / kb_retrieval / station_device_td / alerting / troubleshooting / deep_research
     "task_type": "direct",
     # 知识库证据明细（图文一体右侧证据面板用）。
     # 每项：{"idx": 1, "source": "...md", "score": 0.92, "chunk_text": "...",
@@ -89,7 +90,7 @@ SHARED_STATE: Dict[str, Any] = {
     "alarm_rows": [],
     # 告警概要：{"total":N, "cells_involved":N, "avg_severity":F, "max_severity":F, "top_keywords":[(kw,count),...]}
     "alarm_summary": {},
-    # 通用 SQL 表（sql_chart 卡片底部「原始数据表」用）。
+    # 通用 SQL 表（station_device_td 卡片底部「原始数据表」用）。
     # {"columns": ["ts","voltage","soc",...], "rows": [[...], ...], "title": "..."}
     "sql_table": {"columns": [], "rows": [], "title": ""},
     # 意图澄清候选场景（need_clarification 时展示给用户选择）
@@ -293,8 +294,8 @@ def _inline_referenced_images(
 
 
 # 仅这两类前端布局会内联 RAG 图片到 Markdown 正文中；
-# sql_chart / alarm / direct 都在前端有独立面板，避免双份显示。
-_IMAGE_INLINE_TASK_TYPES = {"kb_retrieval", "fault_diagnosis"}
+# station_device_td / alerting / troubleshooting / direct 都在前端有独立面板，避免双份显示。
+_IMAGE_INLINE_TASK_TYPES = {"kb_retrieval", "deep_research"}
 
 
 def _compose_full_report(
@@ -314,8 +315,8 @@ def _compose_full_report(
       - LLM 正文里写过「图N」的，自动在该段后内联缩略图；
       - 末尾"📎 相关图示"只列**未被内联**的剩余图，避免重复展示。
 
-    Plus v2：仅 kb_retrieval / fault_diagnosis 这两类 task_type 才会内联图片到正文，
-    其它 task_type（sql_chart / alarm / direct）由前端独立面板渲染，避免重复展示。
+    Plus v2：仅 kb_retrieval / deep_research 这两类 task_type 才会内联图片到正文，
+    其它 task_type（station_device_td / alerting / troubleshooting / direct）由前端独立面板渲染，避免重复展示。
     """
     composed = _compose_report_with_chart(report_text or "", chart_path)
 
@@ -641,6 +642,27 @@ def _kb_image_exists(rel_path: str) -> bool:
     return (KB_IMAGES_DIR / rel).is_file()
 
 
+def _to_relative_source_path(raw_source: Any) -> str:
+    """把证据来源路径规范成相对路径，避免前端展示绝对路径。"""
+    s = str(raw_source or "").strip()
+    if not s:
+        return ""
+    s = s.replace("\\", "/")
+    p = Path(s)
+    if p.is_absolute():
+        try:
+            return p.relative_to(PROJECT_ROOT).as_posix()
+        except Exception:
+            # 若绝对路径不在 PROJECT_ROOT 下，尽量截取出项目内可读段落
+            marker = f"/{PROJECT_ROOT.name}/"
+            idx = s.find(marker)
+            if idx >= 0:
+                return s[idx + len(marker):].lstrip("/")
+            # 最后兜底：只返回文件名，避免泄露机器绝对路径
+            return p.name
+    return s.lstrip("./")
+
+
 def _record_retrieved_images_from_results(results: List[Dict[str, Any]]) -> int:
     """从 `unified_local_search` 命中结果中提取 image_paths 写入 SHARED_STATE。
 
@@ -661,7 +683,7 @@ def _record_retrieved_images_from_results(results: List[Dict[str, Any]]) -> int:
             continue
         content = str(item.get("content") or "").strip().replace("\n", " ")
         caption = content[:160] + ("..." if len(content) > 160 else "")
-        source = meta.get("file_path") or meta.get("source") or ""
+        source = _to_relative_source_path(meta.get("file_path") or meta.get("source") or "")
         score = float(meta.get("score") or 0.0)
         for rel in rels:
             if not _kb_image_exists(rel):
@@ -710,12 +732,9 @@ def _record_evidence_chunks_from_results(query: str, results: List[Dict[str, Any
         if not content:
             continue
         chunk_text = content if len(content) <= 800 else content[:800] + "..."
-        source = meta.get("file_path") or meta.get("source") or "unknown"
-        # source 可能是绝对路径，前端展示用 basename 更友好；但保留原值供"查看原文"
-        try:
-            source_label = os.path.basename(source) if source and "/" in source else source
-        except Exception:
-            source_label = source
+        source = _to_relative_source_path(meta.get("file_path") or meta.get("source") or "unknown")
+        # 证据面板按需求显示相对路径，不再展示绝对路径
+        source_label = source or "unknown"
         score = float(meta.get("score") or 0.0)
         rels = _norm_image_paths_field(meta.get("image_paths"))
         rels_existing = [r for r in rels if _kb_image_exists(r)]
@@ -1069,7 +1088,7 @@ def _extract_structured_data(output: dict):
       - SHARED_STATE["task_type"]   ← state.task_type
       - SHARED_STATE["alarm_rows"]  ← raw_db_results 中的告警行（按 alarm_event 表）
       - SHARED_STATE["alarm_summary"] ← 总数 / 涉及电芯 / 平均严重度 / 主要异常类型
-      - SHARED_STATE["sql_table"]   ← 通用表格（sql_chart 卡片底部展示）
+      - SHARED_STATE["sql_table"]   ← 通用表格（station_device_td 卡片底部展示）
     """
     # task_type 透传
     tt = find_recursive(output, "task_type")
@@ -1106,13 +1125,19 @@ def _extract_structured_data(output: dict):
         if metrics:
             SHARED_STATE["structured_metrics"] = metrics
 
-        # 2) 通用 SQL 表（sql_chart 用）
+        # 2) 通用 SQL 表（station_device_td 用）
         sql_table = _build_sql_table(raw_rows)
         if sql_table.get("columns"):
             SHARED_STATE["sql_table"] = sql_table
 
-        # 3) 告警明细 + 概要：按 db_route 或表名识别
+        # 3) 按 db_route 归一化数据库三场景 task_type
         db_route = find_recursive(output, "db_route") or ""
+        if isinstance(db_route, str):
+            route_l = db_route.lower()
+            if route_l in {"station_device_td", "alerting", "troubleshooting"}:
+                SHARED_STATE["task_type"] = route_l
+
+        # 4) 告警明细 + 概要：按 db_route 或表名识别
         is_alarm_route = (
             (isinstance(db_route, str) and db_route.lower() == "alerting")
             or any(
@@ -1141,8 +1166,8 @@ def _extract_structured_data(output: dict):
                 alarm_rows.sort(key=_sort_key)
                 SHARED_STATE["alarm_rows"] = alarm_rows[:200]
                 SHARED_STATE["alarm_summary"] = _build_alarm_summary(alarm_rows)
-                # 同时把 task_type 校正为 alarm（兜底，防止 supervisor 没标对）
-                SHARED_STATE["task_type"] = "alarm"
+                # 同时把 task_type 校正为 alerting（兜底，防止 supervisor 没标对）
+                SHARED_STATE["task_type"] = "alerting"
 
 
 async def background_graph_runner(
@@ -1417,6 +1442,52 @@ app.mount("/figure", StaticFiles(directory=str(PROJECT_ROOT / "figure")), name="
 app.mount("/reports", StaticFiles(directory=str(PROJECT_ROOT / "reports")), name="reports")
 # 暴露 RAG 知识库图片：浏览器 `<img src="/kb_images/doc-XXX/HASH.jpg">` 即可加载
 app.mount("/kb_images", StaticFiles(directory=str(KB_IMAGES_DIR)), name="kb_images")
+
+from deep_research import funasr_service as _funasr
+
+
+@app.get("/api/asr/status")
+async def api_asr_status():
+    return {
+        "enabled": _funasr.is_enabled(),
+        "ffmpeg": _funasr.ffmpeg_available(),
+        "model_loaded": _funasr.model_loaded(),
+        "model": os.getenv("FUNASR_MODEL", "paraformer-zh"),
+        "last_error": _funasr.last_load_error(),
+    }
+
+
+@app.post("/api/asr/transcribe")
+async def api_asr_transcribe(audio: UploadFile = File(...)):
+    if not _funasr.is_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="FunASR 未启用或未安装。请在 thinkdepth 环境执行: pip install funasr modelscope",
+        )
+    raw = await audio.read()
+    limit = _funasr.max_upload_bytes()
+    if len(raw) > limit:
+        mb = limit // (1024 * 1024)
+        raise HTTPException(status_code=413, detail=f"音频过大，上限约 {mb} MB")
+
+    suffix = Path(audio.filename or "upload.webm").suffix or ".webm"
+    tmp_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(raw)
+            tmp_path = Path(tmp.name)
+        text = await asyncio.to_thread(_funasr.transcribe_file, tmp_path, suffix)
+        return {"text": text or ""}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    finally:
+        if tmp_path is not None and tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
 
 
 class ChatRequest(BaseModel):

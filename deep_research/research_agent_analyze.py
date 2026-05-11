@@ -1303,35 +1303,35 @@ async def retrieve_battery_node(state: AgentState):
         question = route_json.get("clarify_question") or "请补充设备定位（box/cluster/pack/cell）以及时间范围。"
         clarify_candidates = [
             {
-                "id": "sql_chart",
+                "id": "station_device_td",
                 "icon": "📊",
                 "title": "设备实时查询",
                 "desc": "查 box_data / cluster_data / bmu_data 时序趋势",
                 "hint": "请补充设备编码（bmu_code/cluster_code/box_code）和时间范围",
             },
             {
-                "id": "alarm",
+                "id": "alerting",
                 "icon": "⚠️",
                 "title": "异常预警",
                 "desc": "查 alarm_event / volt_temp_abnormal_result 告警摘要",
                 "hint": "请补充设备/站点范围和关注的时间段",
             },
             {
-                "id": "fault_dcr",
+                "id": "troubleshooting_dcr",
                 "icon": "🔍",
                 "title": "故障钻探 · 内阻异常",
                 "desc": "查 dcr_abnormal_cells 内阻异常电芯汇总",
                 "hint": "请补充 pack/bmu 编码和时间范围",
             },
             {
-                "id": "fault_isc",
+                "id": "troubleshooting_isc",
                 "icon": "🔍",
                 "title": "故障钻探 · ISC评分",
                 "desc": "查 isc_score_result 微短路/内短路评分",
                 "hint": "请补充 bmu_code 和滑窗时间范围",
             },
             {
-                "id": "fault_cap",
+                "id": "troubleshooting_cap",
                 "icon": "🔍",
                 "title": "故障钻探 · 容量不一致",
                 "desc": "查 capacity_inconsistent_cells 容量不一致电芯",

@@ -403,8 +403,9 @@ body[data-sidebar="collapsed"] .new-chat-btn { padding: 10px; justify-content: c
 }
 .md-body img:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.1); }
 .ai-card[data-task-type="kb_retrieval"] .md-body img,
-.ai-card[data-task-type="fault_diagnosis"] .md-body img,
-.ai-card[data-task-type="sql_chart"] .md-body img {
+.ai-card[data-task-type="troubleshooting"] .md-body img,
+.ai-card[data-task-type="station_device_td"] .md-body img,
+.ai-card[data-task-type="deep_research"] .md-body img {
   max-width: 68%;
   max-height: 220px;
 }
@@ -1003,6 +1004,26 @@ body.resizing-rail .rail-resize-handle::after {
 .send-btn:active { transform: translateY(0); }
 .send-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
+.mic-btn {
+  display: flex; align-items: center; justify-content: center;
+  min-width: 48px; height: 48px; padding: 0 14px;
+  border-radius: var(--radius); border: 1px solid var(--border);
+  background: var(--bg-soft); color: var(--text-primary);
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  white-space: nowrap; flex-shrink: 0;
+  transition: border-color 0.15s, background 0.15s;
+}
+.mic-btn:hover { border-color: var(--primary); background: var(--card); }
+.mic-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.mic-btn.recording {
+  border-color: #ef4444; color: #ef4444;
+  animation: micPulse 1.2s ease-in-out infinite;
+}
+.mic-btn.mic-btn-unavailable {
+  opacity: 0.55; cursor: help;
+}
+@keyframes micPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
 /* ========== Image Lightbox ========== */
 .lb-overlay {
   position: fixed; inset: 0; z-index: 9999;
@@ -1225,6 +1246,7 @@ body.lb-locked { overflow: hidden; }
           onkeydown="handleKeyDown(event)" oninput="updateCharCount()"></textarea>
         <div class="char-counter" id="charCounter">0 / 2000</div>
       </div>
+      <button type="button" class="mic-btn" id="micBtn" title="语音：再点一次结束并识别">语音</button>
       <button class="send-btn" id="sendBtn" onclick="sendMessage()">
         <span>✨</span><span>开始分析</span>
       </button>
@@ -1277,18 +1299,18 @@ const TASK_TYPE_META = {
     icon: '📚', title: '储能知识库检索', tag: '图文一体证据', tagColor: 'purple', railShow: true,
     railTitle: '证据面板', railMeta: '图文一体证据片段 · 按相关度排序',
   },
-  sql_chart: {
-    icon: '📊', title: '设备实时查询', tag: 'SQL+可视化', tagColor: 'blue', railShow: false,
+  station_device_td: {
+    icon: '📊', title: '设备实时查询', tag: '查库链路', tagColor: 'blue', railShow: false,
   },
-  alarm: {
+  alerting: {
     icon: '⚠️', title: '异常预警', tag: '告警分析', tagColor: 'orange', railShow: true,
     railTitle: '告警工具箱', railMeta: '快速复用本次分析能力',
   },
-  fault_diagnosis: {
+  troubleshooting: {
     icon: '🔍', title: '故障钻探', tag: '根因诊断', tagColor: 'red', railShow: true,
     railTitle: '诊断面板', railMeta: '异常电芯 · 根因分析 · 置信度',
   },
-  deep_retrieval: {
+  deep_research: {
     icon: '🧠', title: '深度检索', tag: '深度推理', tagColor: 'purple', railShow: true,
     railTitle: '证据面板', railMeta: '检索证据 + 多智能体推理',
   },
@@ -1411,12 +1433,12 @@ function renderRail(tt) {
   titleEl.textContent = meta.railTitle || '证据面板';
   metaEl.textContent = meta.railMeta || '';
 
-  if (tt === 'alarm') {
+  if (tt === 'alerting') {
     tabsEl.innerHTML = '';
     bodyEl.innerHTML = renderAlarmCapabilityRail();
     return;
   }
-  // kb_retrieval / fault_diagnosis / deep_retrieval: evidence panel
+  // kb_retrieval / troubleshooting / deep_research: evidence panel
   const ev = (activeCardId && cardState.get(activeCardId)?.evidence_chunks) || [];
   const tabs = [
     { id: 'all', label: '全部', count: ev.length },
@@ -1431,7 +1453,7 @@ function renderRail(tt) {
   if (activeRailTab === 'text') filtered = ev.filter(x => x.kind !== 'image');
   if (activeRailTab === 'image') filtered = ev.filter(x => (x.image_urls||[]).length > 0);
 
-  if (tt === 'fault_diagnosis' || tt === 'deep_retrieval') {
+  if (tt === 'troubleshooting' || tt === 'deep_research') {
     const cs = (activeCardId && cardState.get(activeCardId)) || {};
     const summary = cs.diagnosis_summary || '';
     const tags = cs.diagnosis_tags || [];
@@ -1546,10 +1568,10 @@ function renderExamples() {
     return;
   }
   // Group by category_id
-  const order = ['direct', 'kb_retrieval', 'sql_chart', 'alarm', 'fault_diagnosis', 'deep_retrieval'];
+  const order = ['direct', 'kb_retrieval', 'station_device_td', 'alerting', 'troubleshooting', 'deep_research'];
   const labelMap = {
-    direct: '通用问答', kb_retrieval: '储能知识库检索', sql_chart: '设备实时查询',
-    alarm: '异常预警', fault_diagnosis: '故障钻探', deep_retrieval: '深度检索',
+    direct: '通用问答', kb_retrieval: '储能知识库检索', station_device_td: '设备实时查询',
+    alerting: '异常预警', troubleshooting: '故障钻探', deep_research: '深度检索',
   };
   const groups = {};
   exampleQuestions.forEach(q => {
@@ -1584,7 +1606,7 @@ function renderEmptyCards() {
   const root = document.getElementById('emptyCards');
   if (!root || !exampleQuestions.length) return;
   // Pick one example per category as a quick-start tile
-  const order = ['direct', 'kb_retrieval', 'sql_chart', 'alarm', 'fault_diagnosis', 'deep_retrieval'];
+  const order = ['direct', 'kb_retrieval', 'station_device_td', 'alerting', 'troubleshooting', 'deep_research'];
   const seen = new Set();
   const picks = [];
   for (const q of exampleQuestions) {
@@ -1610,7 +1632,7 @@ function selectExample(i) {
   document.getElementById('inputField').value = q.question;
   updateCharCount();
   toggleExamples();
-  // Auto-toggle deep mode for fault_diagnosis
+  // Auto-toggle deep mode for deep_research
   if (q.mode === 'deep') setMode('deep');
   else if (q.mode === 'fast') setMode('fast');
   document.getElementById('inputField').focus();
@@ -1858,10 +1880,10 @@ function rerenderCard(cardId) {
   let bodyH = '';
   switch (tt) {
     case 'kb_retrieval':    bodyH = renderKbRetrievalCard(cs); break;
-    case 'sql_chart':       bodyH = renderSqlChartCard(cs); break;
-    case 'alarm':           bodyH = renderAlarmCard(cs); break;
-    case 'fault_diagnosis': bodyH = renderFaultDiagnosisCard(cs); break;
-    case 'deep_retrieval':  bodyH = renderFaultDiagnosisCard(cs); break;
+    case 'station_device_td': bodyH = renderSqlChartCard(cs); break;
+    case 'alerting':          bodyH = renderAlarmCard(cs); break;
+    case 'troubleshooting':   bodyH = renderFaultDiagnosisCard(cs); break;
+    case 'deep_research':     bodyH = renderFaultDiagnosisCard(cs); break;
     default:                bodyH = renderDirectCard(cs);
   }
   const footerH = `
@@ -2616,11 +2638,129 @@ async function loadHistory() {
   } catch (e) {}
 }
 
+// ==========================================
+// FunASR 语音输入（填充输入框，不自动发送）
+// ==========================================
+let asrMediaRecorder = null;
+let asrChunks = [];
+let asrStream = null;
+
+async function refreshAsrUi() {
+  const btn = document.getElementById('micBtn');
+  if (!btn) return;
+  btn.style.display = '';
+  try {
+    const r = await fetch('/api/asr/status');
+    const s = await r.json();
+    if (s.enabled) {
+      btn.dataset.asrReady = '1';
+      btn.classList.remove('mic-btn-unavailable');
+      btn.disabled = false;
+      btn.title = s.ffmpeg
+        ? '语音：再点一次结束并识别'
+        : '语音（建议安装 ffmpeg 以支持浏览器 webm）';
+      return;
+    }
+    btn.dataset.asrReady = '0';
+    btn.classList.add('mic-btn-unavailable');
+    btn.disabled = false;
+    btn.title = '语音识别未就绪：请在 thinkdepth 环境执行 pip install funasr modelscope 后重启服务';
+  } catch (_) {
+    btn.dataset.asrReady = '0';
+    btn.classList.add('mic-btn-unavailable');
+    btn.disabled = false;
+    btn.title = '无法获取语音识别状态：请确认已用最新代码启动 server_plus.py 并刷新页面';
+  }
+}
+
+function mergeAsrText(text) {
+  const inp = document.getElementById('inputField');
+  const t = (text || '').trim();
+  if (!t) return;
+  const cur = inp.value.trim();
+  inp.value = (cur ? (cur + '\n' + t) : t).slice(0, 2000);
+  updateCharCount();
+}
+
+function asrErrDetail(data, resp) {
+  const d = data && data.detail;
+  if (typeof d === 'string') return d;
+  if (Array.isArray(d)) return d.map((x) => (x.msg || JSON.stringify(x))).join('; ');
+  return (data && data.message) || resp.statusText || '请求失败';
+}
+
+document.getElementById('micBtn')?.addEventListener('click', toggleAsrRecord);
+
+async function toggleAsrRecord() {
+  const btn = document.getElementById('micBtn');
+  if (!btn || btn.disabled) return;
+  if (btn.dataset.asrReady !== '1') {
+    alert(btn.title || '语音识别未就绪，请查看页面「语音」按钮悬停提示或 readme_ASR_funasr.md');
+    return;
+  }
+  if (asrMediaRecorder && asrMediaRecorder.state === 'recording') {
+    btn.textContent = '处理中...';
+    btn.disabled = true;
+    asrMediaRecorder.stop();
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    alert('当前浏览器不支持麦克风采集（getUserMedia）');
+    return;
+  }
+  if (typeof MediaRecorder === 'undefined') {
+    alert('当前浏览器不支持 MediaRecorder，请升级浏览器后再试');
+    return;
+  }
+  asrChunks = [];
+  try {
+    asrStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    let mime = 'audio/webm;codecs=opus';
+    if (!MediaRecorder.isTypeSupported(mime)) mime = 'audio/webm';
+    asrMediaRecorder = new MediaRecorder(asrStream, { mimeType: mime });
+    asrMediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) asrChunks.push(e.data); };
+    asrMediaRecorder.onstop = async () => {
+      btn.classList.remove('recording');
+      btn.disabled = true;
+      if (asrStream) asrStream.getTracks().forEach((t) => t.stop());
+      asrStream = null;
+      const blob = new Blob(asrChunks, { type: asrMediaRecorder.mimeType || 'audio/webm' });
+      asrMediaRecorder = null;
+      asrChunks = [];
+      try {
+        const fd = new FormData();
+        fd.append('audio', blob, 'speech.webm');
+        const resp = await fetch('/api/asr/transcribe', { method: 'POST', body: fd });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(asrErrDetail(data, resp));
+        mergeAsrText(data.text || '');
+        showToast('语音识别完成，已填入输入框');
+      } catch (e) {
+        console.error(e);
+        alert('语音识别失败: ' + (e.message || e));
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '语音';
+      }
+    };
+    asrMediaRecorder.start(200);
+    btn.classList.add('recording');
+    btn.textContent = '停止录音';
+    showToast('录音中，再点一次按钮结束');
+  } catch (e) {
+    console.error(e);
+    btn.classList.remove('recording');
+    btn.textContent = '语音';
+    alert('无法开始录音，请检查麦克风权限: ' + (e.message || e));
+  }
+}
+
 loadHistory();
 loadExamples();
 initLayoutPref();
 initRailResizeDrag();
 applyTaskType('direct');
+refreshAsrUi();
 </script>
 </body>
 </html>

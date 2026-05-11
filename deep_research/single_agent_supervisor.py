@@ -144,9 +144,9 @@ def _log_supervisor_parse_failure(hint: str, resp_text: str) -> None:
 
 
 # =============================================================================
-# task_type 推断（6 类前端布局：direct / kb_retrieval / sql_chart / alarm / fault_diagnosis / deep_retrieval）
+# task_type 推断（6 类前端布局：direct / kb_retrieval / station_device_td / alerting / troubleshooting / deep_research）
 # =============================================================================
-_TASK_TYPE_VALID = {"direct", "kb_retrieval", "sql_chart", "alarm", "fault_diagnosis", "deep_retrieval"}
+_TASK_TYPE_VALID = {"direct", "kb_retrieval", "station_device_td", "alerting", "troubleshooting", "deep_research"}
 
 # 告警关键词：覆盖中英文常见说法
 _ALARM_KEYWORDS = (
@@ -174,7 +174,7 @@ _FAULT_DIAG_KEYWORDS = (
 def _infer_task_type(next_action: str, params: Dict[str, Any], user_req: str) -> str:
     """
     后端兜底：当 LLM 未输出 task_type 或输出非法值时，按规则推断。
-    优先级：alarm > fault_diagnosis > sql_chart > kb_retrieval > direct。
+    优先级：alerting > troubleshooting > station_device_td > kb_retrieval > direct。
     """
     action = (next_action or "DIRECT").upper()
     req = str(user_req or "")
@@ -187,14 +187,15 @@ def _infer_task_type(next_action: str, params: Dict[str, Any], user_req: str) ->
 
     if action == "DATABASE":
         if has_alarm_kw or str(params.get("summary_keyword") or "").strip():
-            return "alarm"
+            return "alerting"
         if has_fault_kw:
-            return "fault_diagnosis"
+            return "troubleshooting"
+        # 图表需求并不改变主功能类别：仍属于设备实时查询场景
         if has_chart_kw or any(params.get(k) for k in ("chart_after_db", "chart_type", "x_field", "y_field")):
-            return "sql_chart"
-        return "sql_chart"
+            return "station_device_td"
+        return "station_device_td"
     if action == "CHART":
-        return "sql_chart"
+        return "station_device_td"
     if action == "RETRIEVE":
         return "kb_retrieval"
     return "direct"
@@ -427,6 +428,20 @@ async def execute_tools_node(state: AgentState):
             raw_data = tool_result.get("raw_db_results", [])
             data_str = _summarize_db_results(raw_data)
             route_name = tool_result.get("db_route", "unknown")
+            # DATABASE 子链路最终功能类型以 db_route 为准（而不是顶层粗粒度 task_type）
+            if route_name == "station_device_td":
+                updates["task_type"] = "station_device_td"
+            elif route_name == "alerting":
+                updates["task_type"] = "alerting"
+            elif route_name == "troubleshooting":
+                updates["task_type"] = "troubleshooting"
+            elif route_name == "clarification_needed":
+                # 仅查库链路会触发 clarification；维持数据库主场景语义
+                fallback_tt = str(state.get("task_type", "") or "").strip()
+                if fallback_tt in {"station_device_td", "alerting", "troubleshooting"}:
+                    updates["task_type"] = fallback_tt
+                else:
+                    updates["task_type"] = "station_device_td"
             evidence_bundle = tool_result.get("db_evidence_bundle", {})
             evidence_str = ""
             if isinstance(evidence_bundle, dict) and evidence_bundle:
@@ -486,6 +501,7 @@ async def execute_tools_node(state: AgentState):
     # === 分支 2: 调用外部绘图工具 (CHART) ===
     elif route == "CHART":
         print(">>> Calling External Tool: generate_chart_node ...")
+        updates["task_type"] = "station_device_td"
         try:
             if asyncio.iscoroutinefunction(generate_chart_node):
                 tool_result = await generate_chart_node(state)

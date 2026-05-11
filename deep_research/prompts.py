@@ -166,17 +166,16 @@ supervisor_system_prompt = """
 `task_type` 必须从以下 6 个枚举值中精准选择，前端会据此切换展示卡片：
 
 - `"direct"`：通用问答 / 闲聊 / 自我介绍。一般对应 `next_action=DIRECT`。
-- `"kb_retrieval"`：储能知识库检索（概念、流程、设备介绍、案例汇总等图文一体检索）。一般对应 `next_action=RETRIEVE`。
-- `"sql_chart"`：设备实时查询，时序数据查询并配合可视化图表（电压、电流、SOC、SOH、温度等趋势）。对应 `next_action=DATABASE` 且要求绘图（如带 `chart_after_db=true` 或用户明显要求出图），或对应 `next_action=CHART`。
-- `"alarm"`：异常预警类查询（涉及 `alarm_event` / `alarm_events` 表，关键词：告警、报警、severity、average_severity、summary_cn、严重度、风险等级、归纳异常类型等）。对应 `next_action=DATABASE` 但走 alerting 路线。
-- `"fault_diagnosis"`：故障钻探（查根因诊断、异常电芯线索，涉及 dcr_abnormal_cells/isc_score_result/capacity_inconsistent_cells 等诊断表）。对应 `next_action=DATABASE` 但走 troubleshooting 路线。
-- `"deep_retrieval"`：深度检索推理（专家模式深度推理时由上层覆盖，本节点一般无需输出此值）。
+- `"kb_retrieval"`：运维知识库检索（概念、流程、设备介绍、案例汇总等图文一体检索）。一般对应 `next_action=RETRIEVE`。
+- `"station_device_td"`：设备实时查询（box_data/cluster_data/bmu_data 时序查询）。对应 `next_action=DATABASE` 或 `next_action=CHART`。若有出图需求，作为并行能力（`chart_after_db`）而非单独功能。
+- `"alerting"`：异常告警（`alarm_event` / `alarm_events` 及相关告警表）。对应 `next_action=DATABASE` 且走 alerting 路线。
+- `"troubleshooting"`：故障钻探（`dcr_abnormal_cells` / `isc_score_result` / `capacity_inconsistent_cells` 等诊断表）。对应 `next_action=DATABASE` 且走 troubleshooting 路线。
+- `"deep_research"`：深度检索（复杂任务由上层 Multi-Agent 链路覆盖写入，本节点通常无需主动输出）。
 
 判定优先级：
-1. 若问题涉及告警/报警/severity → `alarm`（高于普通 sql_chart）。
-2. 若问题涉及 dcr/isc/capacity 等诊断表、内阻异常、微短路评分、容量不一致 → `fault_diagnosis`。
-3. 否则若涉及绘图 / 可视化 / 趋势 → `sql_chart`。
-4. 否则若是 `DATABASE` 查询纯粹拉数 → `sql_chart`（前端会同样走表格+可选图表布局）。
+1. 若问题涉及告警/报警/severity → `alerting`（高于普通设备时序查询）。
+2. 若问题涉及 dcr/isc/capacity 等诊断表、内阻异常、微短路评分、容量不一致 → `troubleshooting`。
+3. 否则若是 `DATABASE` 查询（含出图诉求）→ `station_device_td`。
 5. 否则若是 `RETRIEVE` → `kb_retrieval`。
 6. 否则 → `direct`。
 
@@ -220,10 +219,10 @@ supervisor_system_prompt = """
 **硬约束：JSON 必须合法且可被 `json.loads` 解析。字符串内禁止未转义的双引号与换行；空值用 null，不要在 JSON 外追加任何解释文字。**
 **所有示例输出都必须同时包含 `task_type` 字段。**
 
-示例 1 (查库 + 绘图 = sql_chart):
+示例 1 (设备实时查询 + 出图并行 = station_device_td):
 {{
     "next_action": "DATABASE",
-    "task_type": "sql_chart",
+    "task_type": "station_device_td",
     "reason": "需查询 BMU 时序数据并绘图",
     "params": {{
       "station_code": null,
@@ -240,10 +239,10 @@ supervisor_system_prompt = """
     }}
 }}
 
-示例 2 (告警查询 = alarm):
+示例 2 (告警查询 = alerting):
 {{
     "next_action": "DATABASE",
-    "task_type": "alarm",
+    "task_type": "alerting",
     "reason": "用户询问 alarm_event 中的告警明细与严重度",
     "params": {{
       "station_code": "00256",
@@ -272,10 +271,10 @@ supervisor_system_prompt = """
     "params": {{}}
 }}
 
-示例 5 (故障钻探 = fault_diagnosis):
+示例 5 (故障钻探 = troubleshooting):
 {{
     "next_action": "DATABASE",
-    "task_type": "fault_diagnosis",
+    "task_type": "troubleshooting",
     "reason": "用户查询内阻异常电芯/ISC评分/容量不一致等诊断表",
     "params": {{
       "station_code": "00256",
@@ -285,11 +284,11 @@ supervisor_system_prompt = """
     }}
 }}
 
-示例 6 (模糊状态查询 = sql_chart + 空 params，由下游反问候选场景):
+示例 6 (模糊状态查询 = station_device_td + 空 params，由下游反问候选场景):
 对应 Input 形如："现在系统状态如何？" / "电池运行得怎么样？" / "看一下设备数据" / "有没有告警？"
 {{
     "next_action": "DATABASE",
-    "task_type": "sql_chart",
+    "task_type": "station_device_td",
     "reason": "用户表达设备/系统实时运行状态查询意图，但缺少设备 ID 与时间范围；按 DATABASE B 档（模糊查库）路由，params 全部留 null，由下游 db_intent_router 反问候选场景（设备实时/异常预警/内阻/ISC/容量）",
     "params": {{
       "station_code": null,

@@ -366,15 +366,15 @@ def _retrieve_hybrid_sync(query: str, top_k: int) -> List[Dict[str, Any]]:
     fused_sorted = sorted(fused, key=lambda x: x[0], reverse=True)[:max(1, top_k)]
     out: List[Dict[str, Any]] = []
     for s, d in fused_sorted:
-        meta = d.metadata or {}
+        meta = dict(d.metadata or {})
+        # 保留原 metadata（含 image_paths 等图文关联字段），只统一关键展示字段。
+        meta["source"] = meta.get("source") or meta.get("path") or meta.get("file") or "local"
+        meta["title"] = meta.get("title") or os.path.basename(str(meta.get("source") or "")) or "local"
+        meta["score"] = float(s)
+        meta["type"] = "hybrid"
         out.append({
             "content": d.page_content,
-            "metadata": {
-                "source": meta.get("source") or meta.get("path") or meta.get("file") or "local",
-                "title": meta.get("title") or os.path.basename(str(meta.get("source") or "")) or "local",
-                "score": float(s),
-                "type": "hybrid"
-            }
+            "metadata": meta,
         })
     return out
 

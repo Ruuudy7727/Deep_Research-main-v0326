@@ -653,14 +653,18 @@ async def _lc_retrieve_hybrid_async(query: str, vectordb: "Chroma", top_k: int, 
     fused_sorted = sorted(fused_list, key=lambda x: x[0], reverse=True)
     final_items = fused_sorted[:top_k]
 
-    sources = [{
-        "content": d.page_content,
-        "metadata": {
-            "source": (d.metadata or {}).get("source", "?"),
-            "score": float(s),
-            "type": "hybrid_plan" if is_plan else "hybrid_main"
-        }
-    } for s, d in final_items]
+    sources = []
+    for s, d in final_items:
+        base_meta = dict((d.metadata or {}))
+        # 保留底层检索返回的完整 metadata（尤其 image_paths/file_path/full_doc_id），
+        # 只覆盖统一字段，避免上游链路丢失图文证据关联。
+        base_meta["source"] = base_meta.get("source", "?")
+        base_meta["score"] = float(s)
+        base_meta["type"] = "hybrid_plan" if is_plan else "hybrid_main"
+        sources.append({
+            "content": d.page_content,
+            "metadata": base_meta,
+        })
     return sources
 
 def initialize_all_retrievers() -> None:

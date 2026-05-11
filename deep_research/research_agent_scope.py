@@ -346,7 +346,7 @@ def clarify_with_user(state: AgentState) -> dict:
         print(f"ToT Plan: {tot_outline[:60].replace(chr(10), ' ')}...", flush=True)
 
     # 5. 更新状态 (只更新复杂性标记和思维链)
-    # 复杂任务（深度研究分支）一律标记为 deep_retrieval，前端使用深度检索卡片；
+    # 复杂任务（深度研究分支）一律标记为 deep_research，前端使用深度检索卡片；
     # 简单任务的 task_type 留给 single_agent 内部 supervisor 路由后再写。
     update: Dict[str, Any] = {
         "user_request": messages_str,
@@ -357,7 +357,7 @@ def clarify_with_user(state: AgentState) -> dict:
         ],
     }
     if is_deep_research:
-        update["task_type"] = "deep_retrieval"
+        update["task_type"] = "deep_research"
     return update
 
 
