@@ -585,13 +585,19 @@ async def solve_simple_task(state: AgentState, writer=None) -> dict:
     print("--- Executing Node: solve_simple_task (Simple Path) ---", flush=True)
 
     messages_str = state.get("user_request", "")
-    current_tot = state.get("question", "") 
+    current_tot = (state.get("current_tot") or state.get("question") or "")
     retrieved_info = state.get("pre_brief_cases", "")
     
     # 检查是否有图表 URL
     chart_info = ""
     if state.get("chart_output"):
-        chart_info = f"\n\n[Visual Content]: A chart has been generated: {state.get('chart_output')}. Please mention this in your answer."
+        co = str(state.get("chart_output") or "").strip()
+        pub = f"/figure/{os.path.basename(co.split('?', 1)[0])}" if co and not co.startswith("http") else (co if co.startswith("http") else "")
+        chart_info = (
+            "\n\n[Visual Content]: A trend chart has been generated and is shown in the UI. "
+            "Reference the chart in your answer; do not print local filesystem paths."
+            + (f" Public path hint: {pub}" if pub else "")
+        )
 
     if not retrieved_info:
         print("Warning: No retrieved info found in state (Pure Chat Mode).", flush=True)
@@ -606,6 +612,10 @@ async def solve_simple_task(state: AgentState, writer=None) -> dict:
 
     print("--- [Simple Path] Synthesizing Answer... ---", flush=True)
 
+    route = str(state.get("supervisor_route") or "DIRECT").upper()
+    task_type = str(state.get("task_type") or "").strip().lower()
+    use_direct_demo_few_shots = route == "DIRECT" or task_type == "direct"
+
     # 定义系统指令
     system_instruction = (
         "你是一名资深技术顾问。请根据用户的查询、初步分析(ToT)、检索到的证据(Database/KnowledgeBase)"
@@ -616,14 +626,23 @@ async def solve_simple_task(state: AgentState, writer=None) -> dict:
         "4. 输出纯文本，不要包含任何 JSON 格式。"
         '5. 若用户提及"以上/上面/之前"等代词，请结合对话历史正确理解其指代。'
     )
+    if use_direct_demo_few_shots:
+        fs = simple_direct_demo_few_shots
+        if isinstance(fs, str) and fs.strip():
+            system_instruction = system_instruction + "\n\n" + fs.strip()
 
+    closing = (
+        "基于以上信息，生成精炼回答。"
+        if use_direct_demo_few_shots
+        else "基于以上信息，生成一份精炼的诊断报告。"
+    )
     # 定义用户提示
     user_prompt = (
         f"用户查询:\n{messages_str}\n\n"
         f"初步分析 (ToT):\n{current_tot}\n\n"
         f"检索到的证据/案例/数据:\n{retrieved_info}\n{chart_info}"
         f"{history_block}\n"
-        "基于以上信息，生成一份精炼的诊断报告。"
+        f"{closing}"
     )
 
     LOCAL_MAX_TOKENS = 4096

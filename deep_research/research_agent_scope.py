@@ -408,14 +408,20 @@ async def solve_simple_task(state: AgentState, writer: StreamWriter) -> dict:
 
     # 1. 提取上下文信息
     user_req = state.get("user_request", "")
-    tot_plan = state.get("current_tot", "")
+    tot_plan = state.get("current_tot") or state.get("question") or ""
     rag_info = state.get("pre_brief_cases", "")
     db_info = state.get("db_query_result", "")  # [新增] 确保也能看到数据库查询结果
     
     # 2. 检查是否有图表
     chart_context = ""
     if state.get("chart_output"):
-        chart_context = f"\n[辅助信息]: 系统已生成可视化图表，路径/描述为: {state.get('chart_output')}。请在报告中结合图表趋势进行说明。"
+        co = str(state.get("chart_output") or "").strip()
+        pub = f"/figure/{os.path.basename(co.split('?', 1)[0])}" if co and not co.startswith("http") else (co if co.startswith("http") else "")
+        chart_context = (
+            "\n[辅助信息]: 系统已生成趋势图并在界面中展示。"
+            "请结合图表趋势说明，严禁在回复中写出服务器本地文件路径或磁盘路径。"
+            + (f" 图表相对 URL（仅供理解，勿原样粘贴长 URL）: {pub}" if pub else "")
+        )
 
     # 3. 数据存在性检查 (用于日志提示)
     has_data = bool(db_info or "Source: database" in rag_info)
@@ -445,6 +451,20 @@ async def solve_simple_task(state: AgentState, writer: StreamWriter) -> dict:
         "3. 输出纯文本，不要包含 JSON。"
     )
 
+    route = str(state.get("supervisor_route") or "DIRECT").upper()
+    task_type = str(state.get("task_type") or "").strip().lower()
+    use_direct_demo_few_shots = route == "DIRECT" or task_type == "direct"
+    if use_direct_demo_few_shots:
+        fs = simple_direct_demo_few_shots
+        if isinstance(fs, str) and fs.strip():
+            system_instruction = system_instruction + "\n\n" + fs.strip()
+
+    closing = (
+        "请依据上述信息生成精炼回答。"
+        if use_direct_demo_few_shots
+        else "请依据上述信息，以专家视角生成回复："
+    )
+
     # 5. 构建用户输入 (User Prompt)
     # 将 RAG 和 DB 数据合并展示，给 LLM 最全的视野
     user_prompt = (
@@ -453,7 +473,7 @@ async def solve_simple_task(state: AgentState, writer: StreamWriter) -> dict:
         f"【数据库查询结果】\n{db_info if db_info else '（本次未进行数据库查询或无结果）'}\n\n"
         f"【知识库检索/案例参考】\n{rag_info}\n\n"
         f"{chart_context}\n\n"
-        "请依据上述信息，以专家视角生成回复："
+        f"{closing}"
     )
 
     LOCAL_MAX_TOKENS = 4096

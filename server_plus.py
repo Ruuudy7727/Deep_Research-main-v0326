@@ -12,6 +12,7 @@ server_plus.py  —  科宝 Cobot 前端服务
     python server_plus.py          # 默认 0.0.0.0:50222
 """
 
+import logging
 import os
 import sys
 import json
@@ -23,11 +24,17 @@ import base64
 import mimetypes
 import re
 import tempfile
+import html as html_module
+
+try:
+    from markdown_it import MarkdownIt
+except ImportError:
+    MarkdownIt = None  # type: ignore
 from typing import List, Dict, Any, Tuple, Optional
 from pathlib import Path
 
 from fastapi import FastAPI, Request, File, UploadFile, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
@@ -93,6 +100,8 @@ SHARED_STATE: Dict[str, Any] = {
     # 通用 SQL 表（station_device_td 卡片底部「原始数据表」用）。
     # {"columns": ["ts","voltage","soc",...], "rows": [[...], ...], "title": "..."}
     "sql_table": {"columns": [], "rows": [], "title": ""},
+    # station_device_td 执行后的完整 SQL 文本列表（前端 SQL 面板展示）
+    "executed_sqls": [],
     # 意图澄清候选场景（need_clarification 时展示给用户选择）
     "clarify_candidates": [],
 }
@@ -114,6 +123,27 @@ MIDEA_AIGC_USER = os.getenv("MIDEA_AIGC_USER", "user")
 UI_VERBOSE_DB_LOG = os.getenv("UI_VERBOSE_DB_LOG", "1").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 SERVER_PLUS_PORT = int(os.getenv("SERVER_PLUS_PORT", "50221"))
+# Uvicorn 访问日志：探针大量 HEAD / 时设为 0 可关闭 access log，保留其它 INFO（如启动）
+_SERVER_PLUS_ACCESS_LOG = os.getenv("SERVER_PLUS_ACCESS_LOG", "1").strip().lower() in {
+    "1", "true", "yes", "y", "on",
+}
+
+
+class _Suppress405AccessLog(logging.Filter):
+    """屏蔽 uvicorn access 中带 405 的行（例如仅有 GET 而无 HEAD 时的探针）。"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if " 405 " in msg or "405 Method Not Allowed" in msg:
+            return False
+        return True
+
+
+def _configure_uvicorn_access_logging() -> None:
+    if os.getenv("SERVER_PLUS_SUPPRESS_ACCESS_405", "1").strip().lower() in {
+        "1", "true", "yes", "y", "on", "",
+    }:
+        logging.getLogger("uvicorn.access").addFilter(_Suppress405AccessLog())
 
 # --- 知识库图片索引 ---
 # RAG 知识库图片根目录（与 step1_build_konwledge.py / step2.5_json2chroma.py 输出一致）
@@ -168,6 +198,116 @@ def _chart_public_url(chart_path: Optional[str]) -> Optional[str]:
     return f"/figure/{os.path.basename(chart_path)}"
 
 
+def _resolve_chart_file_path(chart_path: Optional[str]) -> Optional[str]:
+    """Resolve chart_output / chart_url to a readable local file under figure/."""
+    if not chart_path:
+        return None
+    p = str(chart_path).strip()
+    if p.startswith("http://") or p.startswith("https://"):
+        bn = os.path.basename(p.split("?", 1)[0])
+        for base in (PROJECT_ROOT / "figure", Path.cwd() / "figure"):
+            cand = base / bn
+            if cand.is_file():
+                return str(cand)
+        return None
+    if os.path.isfile(p):
+        return p
+    bn = os.path.basename(p)
+    for base in (PROJECT_ROOT / "figure", Path.cwd() / "figure"):
+        cand = base / bn
+        if cand.is_file():
+            return str(cand)
+    return None
+
+
+def _chart_image_data_uri(chart_path: Optional[str]) -> Optional[str]:
+    path = _resolve_chart_file_path(chart_path)
+    if not path:
+        return None
+    try:
+        mime_type, _ = mimetypes.guess_type(path)
+        if not mime_type:
+            mime_type = "image/png"
+        with open(path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("ascii")
+        return f"data:{mime_type};base64,{b64}"
+    except OSError as e:
+        print(f"[Report HTML] chart embed failed: {e}", flush=True)
+        return None
+
+
+_LEADING_MD_IMG_RE = re.compile(r"^\s*!\[[^\]]*\]\(([^)]+)\)\s*\n*", re.MULTILINE)
+
+
+def _strip_duplicate_leading_chart_md(md_text: str, chart_path: Optional[str]) -> str:
+    """Remove leading ![...](...) lines that point at the same chart file (avoid double image in HTML)."""
+    if not chart_path:
+        return md_text
+    bn = os.path.basename(str(chart_path).split("?", 1)[0])
+    s = (md_text or "").lstrip("\n\r \t")
+    while True:
+        m = _LEADING_MD_IMG_RE.match(s)
+        if not m:
+            break
+        url = (m.group(1) or "").strip().strip('"').strip("'")
+        url_bn = os.path.basename(url.split("?", 1)[0])
+        if url_bn == bn or url.endswith(bn) or f"/figure/{bn}" in url.replace(" ", ""):
+            s = s[m.end() :].lstrip()
+        else:
+            break
+    return s
+
+
+def _markdown_to_html_fragment(md_text: str) -> str:
+    if MarkdownIt is None:
+        return f"<pre>{html_module.escape(md_text)}</pre>"
+    md = MarkdownIt("commonmark", {"html": False, "linkify": False, "breaks": True})
+    return md.render(md_text or "")
+
+
+_REPORT_HTML_STYLE = """
+body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+  line-height: 1.65; color: #1e293b; max-width: 900px; margin: 24px auto; padding: 0 16px 48px; }
+h1 { font-size: 1.5rem; margin-bottom: 0.25rem; color: #0f172a; }
+.meta { color: #64748b; font-size: 0.875rem; margin-bottom: 1.5rem; }
+.report-chart { margin: 1.25rem 0; text-align: center; }
+.report-chart img { max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+.report-body { margin-top: 1.5rem; }
+.report-body img { max-width: 100%; height: auto; }
+.report-body pre { background: #0f172a; color: #e2e8f0; padding: 12px 16px; border-radius: 8px; overflow-x: auto; font-size: 0.875rem; }
+.report-body code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+.report-body blockquote { border-left: 4px solid #3b82f6; margin: 12px 0; padding: 4px 16px; color: #475569; background: #f8fafc; }
+"""
+
+
+def _build_report_html(report_md: str, chart_path: Optional[str], timestamp: str) -> str:
+    """Single-file HTML: embedded chart (base64) + markdown body."""
+    body_md = _strip_duplicate_leading_chart_md(report_md or "", chart_path)
+    chart_uri = _chart_image_data_uri(chart_path)
+    chart_block = ""
+    if chart_uri:
+        chart_block = (
+            f'<div class="report-chart"><img src="{chart_uri}" alt="Chart" /></div>'
+        )
+    inner = _markdown_to_html_fragment(body_md)
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>诊断报告</title>
+<style>{_REPORT_HTML_STYLE}</style>
+</head>
+<body>
+<h1>诊断报告</h1>
+<p class="meta">生成时间：{html_module.escape(timestamp)}</p>
+{chart_block}
+<div class="report-body">{inner}</div>
+</body>
+</html>
+"""
+
+
 def _compose_report_with_chart(report_text: str, chart_path: Optional[str]) -> str:
     report_text = report_text or ""
     chart_url = _chart_public_url(chart_path)
@@ -175,6 +315,9 @@ def _compose_report_with_chart(report_text: str, chart_path: Optional[str]) -> s
         return report_text
     chart_md = f"![Chart]({chart_url})"
     if chart_md in report_text or "<img " in report_text:
+        return report_text
+    task_type = (SHARED_STATE.get("task_type") or "direct").strip().lower()
+    if task_type == "station_device_td" and chart_path:
         return report_text
     return f"{chart_md}\n\n{report_text}" if report_text else chart_md
 
@@ -1226,6 +1369,10 @@ def _extract_structured_data(output: dict):
     if isinstance(tt, str) and tt.strip():
         SHARED_STATE["task_type"] = tt.strip()
 
+    db_sqls = find_recursive(output, "db_executed_sqls")
+    if isinstance(db_sqls, list):
+        SHARED_STATE["executed_sqls"] = [str(s) for s in db_sqls if isinstance(s, str) and s.strip()]
+
     db_evidence = find_recursive(output, "db_evidence_bundle")
     if isinstance(db_evidence, dict):
         suff = db_evidence.get("evidence_sufficiency")
@@ -1244,15 +1391,34 @@ def _extract_structured_data(output: dict):
 
     raw_rows = find_recursive(output, "raw_db_results")
     if raw_rows and isinstance(raw_rows, list):
-        # 1) 老 metrics 兼容
-        metrics = {}
+        # 1) metrics: 收集所有非 null 数值 → 求均值
+        from collections import defaultdict
+        accum: dict[str, list] = defaultdict(list)
+        _METRIC_KEYS = ("soc", "soh", "voltage", "temperature", "current", "temp",
+                        "cell_avg_vol", "cell_avg_temp", "tmax", "tmin", "vmax", "vmin")
         for row in raw_rows:
             if not isinstance(row, dict):
                 continue
-            for key in ("soc", "SOC", "soh", "SOH", "voltage", "temperature", "alarm_count"):
+            for key in _METRIC_KEYS:
                 val = row.get(key)
+                if val is None:
+                    val = row.get(key.upper())
                 if val is not None:
-                    metrics[key.lower()] = val
+                    try:
+                        accum[key.lower()].append(float(val))
+                    except (ValueError, TypeError):
+                        pass
+            if row.get("alarm_count") is not None:
+                try:
+                    accum["alarm_count"].append(float(row["alarm_count"]))
+                except (ValueError, TypeError):
+                    pass
+        metrics = {}
+        for k, vals in accum.items():
+            if vals:
+                metrics[k] = round(sum(vals) / len(vals), 3)
+        if "temp" in metrics and "temperature" not in metrics:
+            metrics["temperature"] = metrics.pop("temp")
         if metrics:
             SHARED_STATE["structured_metrics"] = metrics
 
@@ -1632,6 +1798,20 @@ async def index():
     return HTMLResponse(content=html_path.read_text("utf-8"))
 
 
+@app.head("/")
+async def index_head():
+    """健康检查/负载均衡常用 HEAD /；无此路由时 FastAPI 会对 HEAD 返回 405 并刷屏 INFO。"""
+    html_path = PROJECT_ROOT / "templates" / "chat_plus.html"
+    body = html_path.read_bytes()
+    return Response(
+        content=b"",
+        headers={
+            "content-length": str(len(body)),
+            "content-type": "text/html; charset=utf-8",
+        },
+    )
+
+
 @app.post("/api/chat")
 async def api_chat(req: ChatRequest):
     if SHARED_STATE.get("is_running", False):
@@ -1659,6 +1839,7 @@ async def api_chat(req: ChatRequest):
     SHARED_STATE["alarm_rows"] = []
     SHARED_STATE["alarm_summary"] = {}
     SHARED_STATE["sql_table"] = {"columns": [], "rows": [], "title": ""}
+    SHARED_STATE["executed_sqls"] = []
     SHARED_STATE["clarify_candidates"] = []
     SHARED_STATE["current_mode"] = req.mode
 
@@ -1716,6 +1897,7 @@ async def api_stream():
             alarm_rows = SHARED_STATE.get("alarm_rows") or []
             alarm_summary = SHARED_STATE.get("alarm_summary") or {}
             sql_table = SHARED_STATE.get("sql_table") or {"columns": [], "rows": [], "title": ""}
+            executed_sqls = SHARED_STATE.get("executed_sqls") or []
             clarify_candidates = SHARED_STATE.get("clarify_candidates") or []
 
             if tick % 10 == 0:
@@ -1733,11 +1915,36 @@ async def api_stream():
                     "alarm_rows": alarm_rows,
                     "alarm_summary": alarm_summary,
                     "sql_table": sql_table,
+                    "executed_sqls": executed_sqls,
                     "clarify_candidates": clarify_candidates,
                 }
                 yield f"event: state\ndata: {json.dumps(state_payload, ensure_ascii=False, default=str)}\n\n"
 
             if not is_running and tick > 5:
+                # Always send a final state snapshot so the frontend
+                # receives any data populated after the last periodic state event.
+                final_metrics = SHARED_STATE.get("structured_metrics", {})
+                final_chart = _chart_public_url(SHARED_STATE.get("chart_url"))
+                final_sql_table = SHARED_STATE.get("sql_table") or {"columns": [], "rows": [], "title": ""}
+                final_sqls = SHARED_STATE.get("executed_sqls") or []
+                final_state = {
+                    "is_running": False,
+                    "metrics": final_metrics,
+                    "chart_url": final_chart,
+                    "diagnosis_tags": SHARED_STATE.get("diagnosis_tags", []),
+                    "diagnosis_summary": SHARED_STATE.get("diagnosis_summary", ""),
+                    "mode": SHARED_STATE.get("current_mode", "fast"),
+                    "kb_images": SHARED_STATE.get("retrieved_images") or [],
+                    "task_type": SHARED_STATE.get("task_type") or "direct",
+                    "evidence_chunks": SHARED_STATE.get("evidence_chunks") or [],
+                    "alarm_rows": SHARED_STATE.get("alarm_rows") or [],
+                    "alarm_summary": SHARED_STATE.get("alarm_summary") or {},
+                    "sql_table": final_sql_table,
+                    "executed_sqls": final_sqls,
+                    "clarify_candidates": SHARED_STATE.get("clarify_candidates") or [],
+                }
+                yield f"event: state\ndata: {json.dumps(final_state, ensure_ascii=False, default=str)}\n\n"
+
                 if report and not response_saved:
                     response_saved = True
                     SHARED_STATE["chat_history"].append(
@@ -1804,14 +2011,16 @@ async def api_download():
     report = SHARED_STATE.get("final_report", "")
     if not report:
         return {"error": "暂无报告可下载"}
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"Report_{timestamp}.md"
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ts_file = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"Report_{ts_file}.html"
     reports_dir = PROJECT_ROOT / "reports"
     reports_dir.mkdir(exist_ok=True)
     filepath = reports_dir / filename
-    content = f"# Research Report\n\nGenerated: {timestamp}\n\n---\n\n{report}"
+    chart_path = SHARED_STATE.get("chart_url")
+    content = _build_report_html(report, chart_path, timestamp)
     filepath.write_text(content, encoding="utf-8")
-    return FileResponse(str(filepath), filename=filename, media_type="text/markdown")
+    return FileResponse(str(filepath), filename=filename, media_type="text/html")
 
 
 # ==========================================
@@ -1820,4 +2029,5 @@ async def api_download():
 if __name__ == "__main__":
     host, port = "0.0.0.0", SERVER_PLUS_PORT
     print(f"科宝 Cobot starting: http://localhost:{port}", flush=True)
-    uvicorn.run(app, host=host, port=port)
+    _configure_uvicorn_access_logging()
+    uvicorn.run(app, host=host, port=port, access_log=_SERVER_PLUS_ACCESS_LOG)

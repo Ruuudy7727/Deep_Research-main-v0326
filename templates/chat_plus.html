@@ -532,8 +532,9 @@ body[data-sidebar="collapsed"] .new-chat-btn { padding: 10px; justify-content: c
   background: var(--bg-soft);
 }
 .chart-card-title { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+.chart-card-subtitle { font-size: 11px; color: var(--text-muted); }
 .chart-card-body { padding: 14px; min-height: 220px; display: flex; align-items: center; justify-content: center; background: #fff; }
-.chart-card-body img { max-width: 100%; max-height: 360px; cursor: zoom-in; border-radius: 4px; }
+.chart-card-body img { width: 100%; max-width: 980px; max-height: min(60vh, 460px); object-fit: contain; cursor: zoom-in; border-radius: 4px; }
 .chart-card-empty { color: var(--text-muted); font-size: 13px; padding: 30px; }
 
 .split-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -563,7 +564,7 @@ body[data-sidebar="collapsed"] .new-chat-btn { padding: 10px; justify-content: c
 .sql-table-scroll { max-height: 320px; overflow: auto; display: none; }
 .sql-table-scroll.open { display: block; }
 .sql-table-scroll table {
-  width: 100%; border-collapse: collapse; font-size: 12px;
+  width: max-content; min-width: 100%; border-collapse: collapse; font-size: 12px;
 }
 .sql-table-scroll th {
   position: sticky; top: 0; background: var(--bg-soft);
@@ -577,6 +578,50 @@ body[data-sidebar="collapsed"] .new-chat-btn { padding: 10px; justify-content: c
   white-space: nowrap;
 }
 .sql-table-scroll tr:hover td { background: var(--bg-soft); }
+
+.sql-panel {
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+.sql-panel-hd {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-soft);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.sql-list { padding: 10px 12px; display: grid; gap: 10px; }
+.sql-item { border: 1px solid var(--border-light); border-radius: 8px; overflow: hidden; background: #fff; }
+.sql-item-hd {
+  padding: 8px 10px;
+  display: flex; align-items: center; justify-content: space-between;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--border-light);
+}
+.sql-item-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.sql-copy-btn {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.sql-copy-btn:hover { color: var(--primary); border-color: var(--primary-light); background: var(--primary-soft); }
+.sql-item pre {
+  margin: 0;
+  padding: 10px 12px;
+  background: #0F172A;
+  color: #E2E8F0;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow: auto;
+}
 
 /* ========== Alarm Card ========== */
 .alarm-banner {
@@ -1235,7 +1280,7 @@ body.lb-locked { overflow: hidden; }
       </div>
       <div class="toolbar-spacer"></div>
       <button class="toolbar-action" onclick="copyLatestConclusion()">📋 复制结论</button>
-      <button class="toolbar-action" onclick="downloadReport()">📥 报告下载</button>
+      <button class="toolbar-action" onclick="downloadReport()">📥 导出 HTML 报告</button>
       <button class="toolbar-action danger" onclick="resetChat()">🗑️ 重置对话</button>
     </div>
     <div class="composer-row">
@@ -1300,7 +1345,8 @@ const TASK_TYPE_META = {
     railTitle: '证据面板', railMeta: '图文一体证据片段 · 按相关度排序',
   },
   station_device_td: {
-    icon: '📊', title: '设备实时查询', tag: '查库链路', tagColor: 'blue', railShow: false,
+    icon: '📊', title: '设备实时查询', tag: '查库链路', tagColor: 'blue', railShow: true,
+    railTitle: '查询面板', railMeta: 'SQL 语句 · 数据预览',
   },
   alerting: {
     icon: '⚠️', title: '异常预警', tag: '告警分析', tagColor: 'orange', railShow: true,
@@ -1433,13 +1479,71 @@ function renderRail(tt) {
   titleEl.textContent = meta.railTitle || '证据面板';
   metaEl.textContent = meta.railMeta || '';
 
-  if (tt === 'alerting') {
-    tabsEl.innerHTML = '';
-    bodyEl.innerHTML = renderAlarmCapabilityRail();
+  const cs = (activeCardId && cardState.get(activeCardId)) || {};
+  const _hasSql = Array.isArray(cs.executed_sqls) && cs.executed_sqls.some(s => String(s||'').trim());
+  const _hasData = cs.sql_table && cs.sql_table.columns && cs.sql_table.rows && cs.sql_table.rows.length;
+
+  // --- station_device_td: SQL + Data tabs ---
+  if (tt === 'station_device_td') {
+    const tabs = [
+      { id: 'sql',  label: 'SQL',  show: true },
+      { id: 'data', label: '数据', show: true },
+    ];
+    const active = (['sql','data'].includes(railActiveTab)) ? railActiveTab : 'sql';
+    tabsEl.innerHTML = tabs.filter(t=>t.show).map(t =>
+      `<div class="rail-tab ${t.id===active?'active':''}" onclick="setRailTab('${t.id}')">${t.label}</div>`
+    ).join('');
+    if (active === 'data') bodyEl.innerHTML = renderRailDataTab(cs);
+    else bodyEl.innerHTML = renderRailSqlTab(cs);
     return;
   }
-  // kb_retrieval / troubleshooting / deep_research: evidence panel
-  const ev = (activeCardId && cardState.get(activeCardId)?.evidence_chunks) || [];
+
+  // --- alerting: capability cards + SQL/Data tabs ---
+  if (tt === 'alerting') {
+    const tabs = [
+      { id: 'overview', label: '概览' },
+      { id: 'sql',      label: 'SQL' },
+      { id: 'data',     label: '数据' },
+    ];
+    const active = (['overview','sql','data'].includes(railActiveTab)) ? railActiveTab : 'overview';
+    tabsEl.innerHTML = tabs.map(t =>
+      `<div class="rail-tab ${t.id===active?'active':''}" onclick="setRailTab('${t.id}')">${t.label}</div>`
+    ).join('');
+    if (active === 'sql') bodyEl.innerHTML = renderRailSqlTab(cs);
+    else if (active === 'data') bodyEl.innerHTML = renderRailDataTab(cs);
+    else bodyEl.innerHTML = renderAlarmCapabilityRail();
+    return;
+  }
+
+  // --- troubleshooting / deep_research: evidence + SQL/Data tabs ---
+  if (tt === 'troubleshooting' || tt === 'deep_research') {
+    const ev = cs.evidence_chunks || [];
+    const tabs = [
+      { id: 'evidence', label: '证据', count: ev.length },
+      { id: 'sql',      label: 'SQL' },
+      { id: 'data',     label: '数据' },
+    ];
+    const active = (['evidence','sql','data'].includes(railActiveTab)) ? railActiveTab : 'evidence';
+    tabsEl.innerHTML = tabs.map(t =>
+      `<div class="rail-tab ${t.id===active?'active':''}" onclick="setRailTab('${t.id}')">${t.label}${t.count !== undefined ? ` <span style="opacity:0.6;">(${t.count})</span>` : ''}</div>`
+    ).join('');
+    if (active === 'sql') { bodyEl.innerHTML = renderRailSqlTab(cs); return; }
+    if (active === 'data') { bodyEl.innerHTML = renderRailDataTab(cs); return; }
+    const summary = cs.diagnosis_summary || '';
+    const tags = cs.diagnosis_tags || [];
+    let topHtml = '';
+    if (summary) {
+      topHtml += `<div class="diag-rail-card"><div class="diag-rail-card-title">推理结论</div><div class="diag-rail-card-body">${esc(summary)}</div></div>`;
+    }
+    if (tags.length) {
+      topHtml += `<div class="diag-rail-card"><div class="diag-rail-card-title">置信度</div><div class="diag-rail-card-body">${tags.map(t=>`<span class="tag tag-${t.color||'blue'}" style="margin-right:4px;">${esc(t.text)}</span>`).join('')}</div></div>`;
+    }
+    bodyEl.innerHTML = topHtml + renderEvidenceList(ev);
+    return;
+  }
+
+  // --- kb_retrieval: evidence panel (original) ---
+  const ev = cs.evidence_chunks || [];
   const tabs = [
     { id: 'all', label: '全部', count: ev.length },
     { id: 'text', label: '文档', count: ev.filter(x => x.kind !== 'image').length },
@@ -1452,21 +1556,6 @@ function renderRail(tt) {
   let filtered = ev;
   if (activeRailTab === 'text') filtered = ev.filter(x => x.kind !== 'image');
   if (activeRailTab === 'image') filtered = ev.filter(x => (x.image_urls||[]).length > 0);
-
-  if (tt === 'troubleshooting' || tt === 'deep_research') {
-    const cs = (activeCardId && cardState.get(activeCardId)) || {};
-    const summary = cs.diagnosis_summary || '';
-    const tags = cs.diagnosis_tags || [];
-    let topHtml = '';
-    if (summary) {
-      topHtml += `<div class="diag-rail-card"><div class="diag-rail-card-title">推理结论</div><div class="diag-rail-card-body">${esc(summary)}</div></div>`;
-    }
-    if (tags.length) {
-      topHtml += `<div class="diag-rail-card"><div class="diag-rail-card-title">置信度</div><div class="diag-rail-card-body">${tags.map(t=>`<span class="tag tag-${t.color||'blue'}" style="margin-right:4px;">${esc(t.text)}</span>`).join('')}</div></div>`;
-    }
-    bodyEl.innerHTML = topHtml + renderEvidenceList(filtered);
-    return;
-  }
   bodyEl.innerHTML = renderEvidenceList(filtered);
 }
 
@@ -1495,6 +1584,39 @@ function renderEvidenceList(list) {
         ${thumb ? `<img class="ev-card-thumb" src="${escAttr(thumb)}" alt="evidence">` : ''}
       </div>`;
   }).join('');
+}
+
+function renderRailSqlTab(cs) {
+  const sqls = Array.isArray(cs.executed_sqls) ? cs.executed_sqls.filter(s => String(s||'').trim()) : [];
+  if (!sqls.length) return '<div class="rail-empty"><div class="rail-empty-icon">🧾</div>暂无 SQL 语句</div>';
+  return sqls.map((s, i) => `
+    <div class="sql-item" style="margin-bottom:10px;">
+      <div class="sql-item-hd">
+        <div class="sql-item-title">SQL ${i + 1}</div>
+        <button class="sql-copy-btn" onclick="copySqlText(decodeURIComponent('${encodeURIComponent(String(s))}'))">复制</button>
+      </div>
+      <pre style="margin:0;"><code>${esc(String(s))}</code></pre>
+    </div>`).join('');
+}
+
+function renderRailDataTab(cs) {
+  const tbl = cs.sql_table || {};
+  if (!tbl.columns || !tbl.columns.length || !tbl.rows || !tbl.rows.length) {
+    return '<div class="rail-empty"><div class="rail-empty-icon">📋</div>暂无数据</div>';
+  }
+  const maxRows = Math.min(tbl.rows.length, 500);
+  return `
+    <div class="rail-data-info" style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">
+      显示 ${maxRows} / ${tbl.total || tbl.rows.length} 行 · ${tbl.columns.length} 列
+    </div>
+    <div class="sql-table-scroll" style="display:block;max-height:calc(100vh - 220px);">
+      <table>
+        <thead><tr>${tbl.columns.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+        <tbody>${tbl.rows.slice(0, maxRows).map(r =>
+          `<tr>${r.map(v => `<td>${esc(formatCell(v))}</td>`).join('')}</tr>`
+        ).join('')}</tbody>
+      </table>
+    </div>`;
 }
 
 function renderAlarmCapabilityRail() {
@@ -1530,8 +1652,8 @@ function renderAlarmCapabilityRail() {
       </div>
       <div class="cap-card" onclick="downloadReport()">
         <div class="cap-card-icon">📄</div>
-        <div class="cap-card-title">报告生成</div>
-        <div class="cap-card-desc">下载本轮报告</div>
+        <div class="cap-card-title">HTML 报告</div>
+        <div class="cap-card-desc">导出含图表的单文件 HTML</div>
       </div>
     </div>`;
   return topHtml;
@@ -1833,6 +1955,7 @@ function addAIThinking() {
     task_type: 'direct', evidence_chunks: [],
     alarm_rows: [], alarm_summary: {},
     sql_table: { columns: [], rows: [] },
+    executed_sqls: [],
     kb_images: [], mode: currentMode,
   });
   const area = document.getElementById('chatArea');
@@ -1889,7 +2012,7 @@ function rerenderCard(cardId) {
   const footerH = `
     <div class="ai-card-ft">
       <button class="card-act-btn" onclick="copyRpt('${cardId}')">📋 复制结论</button>
-      <button class="card-act-btn" onclick="downloadReport()">📥 导出报告</button>
+      <button class="card-act-btn" onclick="downloadReport()">📥 导出 HTML 报告</button>
     </div>`;
   card.innerHTML = headerH + bodyH + footerH;
   scrollBot();
@@ -1998,15 +2121,19 @@ function renderSqlChartCard(cs) {
   }
   let metricsH = renderMetricsGrid(cs);
   let chartH = '';
-  if (cs.chart_url) {
-    chartH = `
-      <div class="chart-card">
-        <div class="chart-card-hd">
-          <div class="chart-card-title">📊 数据趋势图</div>
-        </div>
-        <div class="chart-card-body"><img src="${escAttr(cs.chart_url)}" alt="chart"></div>
-      </div>`;
-  }
+  chartH = `
+    <div class="chart-card">
+      <div class="chart-card-hd">
+        <div class="chart-card-title">📊 MCP 趋势图</div>
+        <div class="chart-card-subtitle">横轴时间 / 纵轴关键指标</div>
+      </div>
+      <div class="chart-card-body">${
+        cs.chart_url
+          ? `<img src="${escAttr(cs.chart_url)}" alt="chart">`
+          : `<div class="chart-card-empty">暂无可视化图，请先触发绘图。</div>`
+      }</div>
+    </div>`;
+  let sqlH = '';
   let analysisH = '';
   if (cs.report && cs.report.trim()) {
     const sections = parseSections(cs.report);
@@ -2038,64 +2165,66 @@ function renderSqlChartCard(cs) {
       <span>正在查询数据库 / 生成图表...</span>
     </div></div>`;
   }
-  let tableH = '';
-  const tbl = cs.sql_table || {};
-  if (tbl.columns && tbl.columns.length && tbl.rows && tbl.rows.length) {
-    const tableId = 'tbl_' + Math.random().toString(36).slice(2, 8);
-    tableH = `
-      <div class="ai-card-section" style="padding-top:0;">
-        <div class="sql-table-wrap">
-          <div class="sql-table-toggle" onclick="toggleSqlTable('${tableId}')">
-            <span>📋 原始数据表（${tbl.shown||tbl.rows.length} / 共 ${tbl.total||tbl.rows.length} 行）</span>
-            <span id="${tableId}-arrow">▾</span>
-          </div>
-          <div class="sql-table-scroll" id="${tableId}">
-            <table>
-              <thead><tr>${tbl.columns.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>
-              <tbody>${tbl.rows.slice(0, 200).map(r =>
-                `<tr>${r.map(v => `<td>${esc(formatCell(v))}</td>`).join('')}</tr>`
-              ).join('')}</tbody>
-            </table>
-          </div>
-        </div>
-      </div>`;
-  }
   let clarifyH = renderClarifyCandidates(cs);
-  return `<div class="ai-card-body">${summaryH}${metricsH}${chartH}</div>${analysisH}${tableH}${clarifyH}`;
+  return `<div class="ai-card-body">${summaryH}${metricsH}${chartH}${sqlH}</div>${analysisH}${clarifyH}`;
+}
+
+function _colStats(tbl, colRegex) {
+  if (!tbl || !tbl.columns || !tbl.rows || !tbl.rows.length) return null;
+  const idx = tbl.columns.findIndex(c => colRegex.test(c));
+  if (idx < 0) return null;
+  const vals = tbl.rows.map(r => Number(r[idx])).filter(v => Number.isFinite(v));
+  if (!vals.length) return null;
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const mean = vals.reduce((a,b) => a+b, 0) / vals.length;
+  return { min, max, mean, range: max - min, count: vals.length };
 }
 
 function renderMetricsGrid(cs) {
   const items = [];
   const m = cs.metrics || {};
-  // Generic SOC/SOH/voltage/temperature/alarm_count from old metrics map
-  if (m.soc !== undefined)         items.push({ icon: '🔋', iconBg: 'var(--green-bg)', iconColor: 'var(--green)',  label: 'SOC',     value: m.soc, unit: '%', status: m.soc < 20 ? 'danger' : (m.soc < 50 ? 'warning' : 'normal'), st: m.soc < 50 ? '异常↑' : '正常' });
-  if (m.soh !== undefined)         items.push({ icon: '✅', iconBg: 'var(--green-bg)', iconColor: 'var(--green)',  label: 'SOH',     value: m.soh, unit: '%', status: m.soh > 80 ? 'normal' : 'warning', st: m.soh > 80 ? '稳定' : '老化' });
-  if (m.voltage !== undefined)     items.push({ icon: '⚡', iconBg: 'var(--blue-bg)',  iconColor: 'var(--blue)',   label: '电压',    value: m.voltage, unit: 'V', status: 'stable', st: '正常' });
-  if (m.temperature !== undefined) items.push({ icon: '🌡️',iconBg: 'var(--orange-bg)',iconColor: 'var(--orange)', label: '温度',    value: m.temperature, unit: '°C', status: m.temperature > 45 ? 'danger' : 'stable', st: m.temperature > 45 ? '过高' : '正常' });
-  // Compute SQL-derived voltage stats if sql_table has voltage column
   const tbl = cs.sql_table || {};
-  if (tbl.columns && tbl.rows && tbl.rows.length) {
-    const vIdx = tbl.columns.findIndex(c => /^voltage$/i.test(c));
-    if (vIdx >= 0) {
-      const vals = tbl.rows.map(r => Number(r[vIdx])).filter(v => Number.isFinite(v));
-      if (vals.length) {
-        const min = Math.min(...vals), max = Math.max(...vals);
-        const mean = vals.reduce((a,b)=>a+b, 0) / vals.length;
-        const range = max - min;
-        // Replace voltage single-point if present
-        const idxV = items.findIndex(i => i.label === '电压');
-        const voltageRange = { icon: '📐', iconBg: 'var(--blue-bg)', iconColor: 'var(--blue)', label: '电压范围', value: `${min.toFixed(2)}-${max.toFixed(2)}`, unit: 'V', status: 'stable', st: '微幅波动' };
-        const voltageMean  = { icon: '📊', iconBg: 'var(--purple-bg)', iconColor: 'var(--purple)', label: '平均电压', value: mean.toFixed(3), unit: 'V', status: 'info', st: '均值' };
-        const voltageRng   = { icon: '📈', iconBg: 'var(--green-bg)', iconColor: 'var(--green)', label: '波动范围', value: range.toFixed(3), unit: 'V', status: range > 0.1 ? 'warning' : 'normal', st: range > 0.1 ? '波动较大' : '较小' };
-        if (idxV >= 0) items.splice(idxV, 1);
-        items.push(voltageRange, voltageMean, voltageRng);
-      }
+
+  const _METRIC_DEFS = [
+    { key: 'soc',         colRe: /^soc$/i,             icon: '🔋', bg: 'var(--green-bg)',  fg: 'var(--green)',  label: 'SOC',  unit: '%',
+      statusFn: v => v < 20 ? 'danger' : (v < 50 ? 'warning' : 'normal'),
+      stFn:     v => v < 50 ? '异常' : '正常' },
+    { key: 'soh',         colRe: /^soh$/i,             icon: '✅', bg: 'var(--green-bg)',  fg: 'var(--green)',  label: 'SOH',  unit: '%',
+      statusFn: v => v > 80 ? 'normal' : 'warning',
+      stFn:     v => v > 80 ? '稳定' : '老化' },
+    { key: 'voltage',     colRe: /^voltage$/i,         icon: '⚡', bg: 'var(--blue-bg)',   fg: 'var(--blue)',   label: '电压', unit: 'V',
+      statusFn: () => 'stable', stFn: () => '均值' },
+    { key: 'temperature', colRe: /^(temperature|temp|cell_avg_temp)$/i, icon: '🌡️', bg: 'var(--orange-bg)', fg: 'var(--orange)', label: '温度', unit: '°C',
+      statusFn: v => v > 45 ? 'danger' : 'stable',
+      stFn:     v => v > 45 ? '过高' : '正常' },
+    { key: 'current',     colRe: /^current$/i,         icon: '🔌', bg: 'var(--purple-bg)', fg: 'var(--purple)', label: '电流', unit: 'A',
+      statusFn: () => 'info', stFn: () => '均值' },
+  ];
+
+  for (const def of _METRIC_DEFS) {
+    const stats = _colStats(tbl, def.colRe);
+    const meanVal = stats ? stats.mean : m[def.key];
+    if (meanVal === undefined) continue;
+    const v = typeof meanVal === 'number' ? Number(meanVal.toFixed(2)) : meanVal;
+    items.push({
+      icon: def.icon, iconBg: def.bg, iconColor: def.fg,
+      label: def.label, value: v, unit: def.unit,
+      status: def.statusFn(v), st: def.stFn(v),
+    });
+    if (stats && stats.count > 1) {
+      items.push({
+        icon: '📐', iconBg: def.bg, iconColor: def.fg,
+        label: `${def.label}范围`,
+        value: `${stats.min.toFixed(2)}~${stats.max.toFixed(2)}`,
+        unit: def.unit, status: 'stable', st: `${stats.count}条`,
+      });
     }
   }
+
   if (!items.length) return '';
   return `
     <div class="metrics-grid">
-      ${items.slice(0, 6).map(i => `
+      ${items.slice(0, 8).map(i => `
         <div class="metric-card">
           <div class="metric-icon" style="background:${i.iconBg};color:${i.iconColor};">${i.icon}</div>
           <div class="metric-label">${esc(i.label)}</div>
@@ -2400,6 +2529,7 @@ function startSSE(cardId) {
     if (data.alarm_rows) cs.alarm_rows = data.alarm_rows;
     if (data.alarm_summary) cs.alarm_summary = data.alarm_summary;
     if (data.sql_table) cs.sql_table = data.sql_table;
+    if (data.executed_sqls) cs.executed_sqls = data.executed_sqls;
     if (data.mode) cs.mode = data.mode;
     if (data.clarify_candidates && data.clarify_candidates.length) cs.clarify_candidates = data.clarify_candidates;
     cardState.set(cardId, cs);
@@ -2460,6 +2590,12 @@ function copyRpt(cardId) {
   const cs = cardState.get(cardId);
   if (!cs || !cs.report) return showToast('暂无可复制的内容');
   navigator.clipboard.writeText(cs.report).then(() => showToast('已复制结论到剪贴板'));
+}
+
+function copySqlText(sqlText) {
+  const txt = String(sqlText || '').trim();
+  if (!txt) return showToast('SQL 为空，无法复制');
+  navigator.clipboard.writeText(txt).then(() => showToast('已复制 SQL')).catch(() => showToast('复制失败'));
 }
 
 function getLatestConclusionText() {

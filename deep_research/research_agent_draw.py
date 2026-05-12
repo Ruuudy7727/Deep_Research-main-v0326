@@ -426,7 +426,15 @@ def _call_mcp_chart(intent_data: Dict[str, Any]) -> Dict[str, str]:
 
         final_path = dest_path if saved else url_result
         chart_url_result = final_path
-        chart_log = f"\n\n![Chart]({final_path})\n*Chart Generated: {intent_data.get('title')}*\n"
+        fig_name = os.path.basename(dest_path) if saved and dest_path else (
+            os.path.basename(str(final_path).split("?", 1)[0]) if final_path else ""
+        )
+        pub_md = f"/figure/{fig_name}" if fig_name else ""
+        chart_log = (
+            f"\n\n![Chart]({pub_md})\n*Chart Generated: {intent_data.get('title')}*\n"
+            if pub_md
+            else f"\n\n*Chart Generated: {intent_data.get('title')}*\n"
+        )
     else:
         chart_log = "\n[Chart Error] Valid chart URL not received."
 

@@ -1220,6 +1220,27 @@ def _build_planner_schema_payload(route: str) -> Dict[str, Any]:
     }
 
 
+def _server_now_injection_text() -> str:
+    """供 DB 路由/规划提示词注入，避免模型用训练截止日臆测「今天、此刻」。"""
+    try:
+        from zoneinfo import ZoneInfo
+
+        now = datetime.now(ZoneInfo("Asia/Shanghai"))
+        tz_label = "Asia/Shanghai（业务默认：中国时区）"
+    except Exception:
+        now = datetime.utcnow()
+        tz_label = "UTC（时区数据不可用时的回退）"
+    weekdays = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+    wd = weekdays[int(now.weekday())]
+    iso = now.strftime("%Y-%m-%d %H:%M:%S")
+    return (
+        f"- 服务端当前：{iso}（{wd}）\n"
+        f"- 时区：{tz_label}\n"
+        f"- 使用规则：用户若说「今天、此刻、现在、本周、上周、最近 N 天、截止到当前」等，均以**本条服务端当前时间**为锚计算 "
+        f"`time_range` 及 `now` 的含义；**禁止**把模型训练数据中的日期当作「今天」。"
+    )
+
+
 async def retrieve_battery_node(state: AgentState):
     print("--- Executing Node: retrieve_battery_node ---", flush=True)
     user_req = state.get("user_request", "")
@@ -1247,8 +1268,12 @@ async def retrieve_battery_node(state: AgentState):
         supervisor_params=supervisor_params,
     )
 
+    server_now_ctx = _server_now_injection_text()
+
     try:
-        route_prompt = db_intent_router_prompt.replace("{user_req}", str(user_req))
+        route_prompt = (
+            db_intent_router_prompt.replace("{server_now}", server_now_ctx).replace("{user_req}", str(user_req))
+        )
         route_json, raw_route_text = await _invoke_json_llm_with_raw(route_prompt)
         db_llm_traces["1_intent_router"] = {
             "step": "db_intent_router",
@@ -1373,7 +1398,7 @@ async def retrieve_battery_node(state: AgentState):
             ensure_ascii=False,
         )
         planner_prompt = (
-            db_query_planner_prompt
+            db_query_planner_prompt.replace("{server_now}", server_now_ctx)
             .replace("{user_req}", str(user_req))
             .replace("{router_json}", json.dumps(route_json, ensure_ascii=False))
             .replace("{planner_schema_json}", planner_schema_json)
