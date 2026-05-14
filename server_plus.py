@@ -104,6 +104,10 @@ SHARED_STATE: Dict[str, Any] = {
     "executed_sqls": [],
     # 意图澄清候选场景（need_clarification 时展示给用户选择）
     "clarify_candidates": [],
+    # task_type 卡片用的"指标卡片"载荷（按表分桶 + 设备/时间上下文，前端按 task_type 渲染）
+    # {"task_type": "...", "context": {"device":{...},"time_range":{...}},
+    #  "tables": [{"table":"bmu_data","label":"...","row_count":N,"items":[...]}]}
+    "metric_cards": {},
 }
 
 MEMORY = MemorySaver()
@@ -121,6 +125,7 @@ GEMINI_AIMP_BIZ_ID = os.getenv("GEMINI_AIMP_BIZ_ID", "gemini-2.5-flash")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 MIDEA_AIGC_USER = os.getenv("MIDEA_AIGC_USER", "user")
 UI_VERBOSE_DB_LOG = os.getenv("UI_VERBOSE_DB_LOG", "1").strip().lower() in {"1", "true", "yes", "y", "on"}
+UI_DEBUG_STREAM = os.getenv("UI_DEBUG_STREAM", "0").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 SERVER_PLUS_PORT = int(os.getenv("SERVER_PLUS_PORT", "50221"))
 # Uvicorn 访问日志：探针大量 HEAD / 时设为 0 可关闭 access log，保留其它 INFO（如启动）
@@ -144,6 +149,12 @@ def _configure_uvicorn_access_logging() -> None:
         "1", "true", "yes", "y", "on", "",
     }:
         logging.getLogger("uvicorn.access").addFilter(_Suppress405AccessLog())
+
+
+def _dbg_stream(msg: str) -> None:
+    """Optional verbose debug logger for stream/state diagnosis."""
+    if UI_DEBUG_STREAM:
+        print(f">>> [UI_DEBUG] {msg}", flush=True)
 
 # --- 知识库图片索引 ---
 # RAG 知识库图片根目录（与 step1_build_konwledge.py / step2.5_json2chroma.py 输出一致）
@@ -458,13 +469,20 @@ def _compose_full_report(
       - LLM 正文里写过「图N」的，自动在该段后内联缩略图；
       - 末尾"📎 相关图示"只列**未被内联**的剩余图，避免重复展示。
 
-    Plus v2：仅 kb_retrieval / deep_research 这两类 task_type 才会内联图片到正文，
-    其它 task_type（station_device_td / alerting / troubleshooting / direct）由前端独立面板渲染，避免重复展示。
+    Plus v2：kb_retrieval / deep_research 会组装图文；若 SHARED_STATE 尚未回写 task_type（流式阶段仍为 direct），
+    但已有 evidence_chunks + retrieved_images，仍会拼接检索图，避免回答里缺图。
     """
     composed = _compose_report_with_chart(report_text or "", chart_path)
 
     task_type = (SHARED_STATE.get("task_type") or "direct").strip().lower()
-    if task_type and task_type not in _IMAGE_INLINE_TASK_TYPES:
+    # Fast 链路里 graph 节点若未把 task_type 写回 SHARED_STATE，流式阶段可能仍为 direct；
+    # 只要本轮已有 RAG 文本证据 + 检索图片，仍应把图贴进回答（与证据链一致）。
+    rag_images = list(images if images is not None else (SHARED_STATE.get("retrieved_images") or []))
+    rag_evidence = SHARED_STATE.get("evidence_chunks") or []
+    allow_rag_images = task_type in _IMAGE_INLINE_TASK_TYPES or (
+        bool(rag_images) and bool(rag_evidence)
+    )
+    if not allow_rag_images:
         return composed
 
     used = list(SHARED_STATE.get("answer_images") or [])
@@ -815,105 +833,6 @@ def _to_source_display_name(raw_source: Any) -> str:
     return parts[-1] if parts else s
 
 
-# =============================================================================
-# 图片单独召回（图文双路检索）
-# -----------------------------------------------------------------------------
-# 文本召回归文本，图片召回归图片：用同一条 query 在向量库里做大 k 召回，
-# 然后从结果里**只挑带 image_paths 的 chunk**，作为"语义最相关的图片证据"。
-# 这样不会再出现"段落相邻但语义不相关"的图。
-# =============================================================================
-# 每次最多挑出多少张"语义最相关"的图片证据
-IMAGE_RECALL_TOPK = int(os.getenv("IMAGE_RECALL_TOPK", "2"))
-# 用多大的候选池来扫描（只看带 image_paths 的 chunk，所以池要足够大才能命中）
-IMAGE_RECALL_POOL_K = int(os.getenv("IMAGE_RECALL_POOL_K", "30"))
-
-
-def _image_recall_for_query_sync(query: str) -> List[Dict[str, Any]]:
-    """在向量库里按 query 单独召回"带图 chunk"，返回 top-N 图片元数据列表。
-
-    注意：monkey-patch 的 `_wrapped_vss` 会按 (query, k) 缓存调用结果，所以同 query
-    多次调用只会真正打一次 embedding API。
-    """
-    if not query or not str(query).strip():
-        return []
-    vdb = getattr(dr_utils, "vectordb_instance", None)
-    if vdb is None:
-        return []
-    try:
-        raw = vdb.similarity_search_with_score(query, k=IMAGE_RECALL_POOL_K)
-    except Exception as e:
-        print(f"[Image-Recall] vss failed: {e}", flush=True)
-        return []
-    out: List[Dict[str, Any]] = []
-    for doc, dist in raw or []:
-        meta = dict(getattr(doc, "metadata", None) or {})
-        rels = _norm_image_paths_field(meta.get("image_paths"))
-        if not rels:
-            continue
-        content = (getattr(doc, "page_content", "") or "").strip().replace("\n", " ")
-        caption = content[:160] + ("..." if len(content) > 160 else "")
-        source_full = _to_relative_source_path(meta.get("file_path") or meta.get("source") or "")
-        source_label = _to_source_display_name(source_full)
-        sim = 1.0 - float(dist)
-        for rel in rels:
-            if not _kb_image_exists(rel):
-                continue
-            out.append({
-                "rel": rel,
-                "caption": caption,
-                "source": source_full,
-                "source_label": source_label,
-                "score": sim,
-            })
-        if len(out) >= IMAGE_RECALL_TOPK:
-            break
-    return out[:IMAGE_RECALL_TOPK]
-
-
-async def _image_recall_for_query_async(query: str) -> List[Dict[str, Any]]:
-    return await asyncio.to_thread(_image_recall_for_query_sync, query)
-
-
-def _add_images_to_bucket(items: List[Dict[str, Any]]) -> int:
-    """把 `_image_recall_for_query_*` 给出的图片合并进 SHARED_STATE['retrieved_images']。
-
-    去重以 url 为键；超出 `MAX_RETRIEVED_IMAGES` 时停止追加。
-    """
-    if not items:
-        return 0
-    bucket: List[Dict[str, Any]] = list(SHARED_STATE.get("retrieved_images") or [])
-    seen = {it.get("url") for it in bucket if isinstance(it, dict)}
-    added = 0
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        rel = str(it.get("rel") or "").strip()
-        if not rel or not _kb_image_exists(rel):
-            continue
-        url = _kb_image_url(rel)
-        if url in seen:
-            continue
-        seen.add(url)
-        src_full = str(it.get("source") or "").strip()
-        src_label = str(it.get("source_label") or _to_source_display_name(src_full)).strip()
-        bucket.append({
-            "url": url,
-            "rel": rel,
-            "caption": it.get("caption", ""),
-            "source": src_full,
-            "source_label": src_label,
-            "score": float(it.get("score") or 0.0),
-        })
-        if src_full:
-            print(f"[RAG-SOURCE] image source: '{src_full}' -> '{src_label}'", flush=True)
-        added += 1
-        if len(bucket) >= MAX_RETRIEVED_IMAGES:
-            break
-    if added:
-        SHARED_STATE["retrieved_images"] = bucket
-    return added
-
-
 def _record_retrieved_images_from_results(results: List[Dict[str, Any]]) -> int:
     """从 `unified_local_search` 命中结果中提取 image_paths 写入 SHARED_STATE。
 
@@ -931,7 +850,7 @@ def _record_retrieved_images_from_results(results: List[Dict[str, Any]]) -> int:
         meta = item.get("metadata") or {}
         rels = _norm_image_paths_field(meta.get("image_paths"))
         if not rels:
-            # 命中 chunk 自身没图就跳过；"语义相关的图"由 _image_recall_for_query_* 单独召回补齐。
+            # 命中 chunk 自身无 image_paths 则跳过（不再做单独语义补图召回）。
             continue
         content = str(item.get("content") or "").strip().replace("\n", " ")
         caption = content[:160] + ("..." if len(content) > 160 else "")
@@ -1094,18 +1013,10 @@ def _install_rag_image_capture_patch() -> None:
             try:
                 added_img = _record_retrieved_images_from_results(results or [])
                 added_chunks = _record_evidence_chunks_from_results(query, results or [])
-                # 图片单独召回：从向量库中按 query 直接挑"语义最相关的带图 chunk"，
-                # 不依赖文本召回 top-k 是否恰好命中带图段落。
-                added_img2 = 0
-                try:
-                    extra = await _image_recall_for_query_async(query)
-                    added_img2 = _add_images_to_bucket(extra)
-                except Exception as ir_err:
-                    print(f"[RAG-CAPTURE] image-recall failed: {ir_err}", flush=True)
-                if added_img or added_img2 or added_chunks:
+                if added_img or added_chunks:
                     print(
-                        f"[RAG-CAPTURE] +{added_img} image(s) (hit), +{added_img2} image(s) (semantic), "
-                        f"+{added_chunks} chunk(s) for query='{str(query)[:40]}'",
+                        f"[RAG-CAPTURE] +{added_img} image(s) (hit), +{added_chunks} chunk(s) "
+                        f"for query='{str(query)[:40]}'",
                         flush=True,
                     )
             except Exception as cap_err:
@@ -1124,17 +1035,10 @@ def _install_rag_image_capture_patch() -> None:
                 try:
                     added_img = _record_retrieved_images_from_results(results or [])
                     added_chunks = _record_evidence_chunks_from_results(query, results or [])
-                    # 同 _patched_unified：在深度模式下也跑一次"图片单独召回"。
-                    added_img2 = 0
-                    try:
-                        extra = _image_recall_for_query_sync(query)
-                        added_img2 = _add_images_to_bucket(extra)
-                    except Exception as ir_err:
-                        print(f"[RAG-CAPTURE-SYNC] image-recall failed: {ir_err}", flush=True)
-                    if added_img or added_img2 or added_chunks:
+                    if added_img or added_chunks:
                         print(
-                            f"[RAG-CAPTURE-SYNC] +{added_img} image(s) (hit), +{added_img2} image(s) (semantic), "
-                            f"+{added_chunks} chunk(s) for query='{str(query)[:40]}'",
+                            f"[RAG-CAPTURE-SYNC] +{added_img} image(s) (hit), +{added_chunks} chunk(s) "
+                            f"for query='{str(query)[:40]}'",
                             flush=True,
                         )
                 except Exception as cap_err:
@@ -1191,6 +1095,15 @@ def find_recursive(data, key):
             res = find_recursive(v, key)
             if res:
                 return res
+    return None
+
+
+def find_recursive_any(data, keys: List[str]):
+    """Try multiple recursive keys and return the first non-empty value."""
+    for k in keys:
+        v = find_recursive(data, k)
+        if v:
+            return v
     return None
 
 
@@ -1331,7 +1244,7 @@ def _build_alarm_summary(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _build_sql_table(rows: List[Dict[str, Any]], max_rows: int = 200) -> Dict[str, Any]:
+def _build_sql_table(rows: List[Dict[str, Any]], max_rows: int = 500) -> Dict[str, Any]:
     valid = [r for r in rows if isinstance(r, dict) and not r.get("error")]
     if not valid:
         return {"columns": [], "rows": [], "title": ""}
@@ -1355,6 +1268,282 @@ def _build_sql_table(rows: List[Dict[str, Any]], max_rows: int = 200) -> Dict[st
     }
 
 
+def _norm_field_key(v: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(v or "").lower())
+
+
+# =============================================================================
+# Plus v3：按 task_type / 表 维度构造"指标卡片"载荷（前端 renderMetricsGrid 消费）
+# - 设备 / 时间上下文：从 sanitized db_query_plans 的 filters / time_filter 抽取
+# - 字段聚合：按字段语义（数值/严重度/时间/枚举/布尔），不全是 mean
+# =============================================================================
+_DEVICE_FIELD_PRIORITY: Tuple[Tuple[str, str], ...] = (
+    ("bmu_code", "BMU"),
+    ("cluster_code", "簇"),
+    ("box_code", "箱"),
+    ("bms_code", "BMS"),
+    ("station_code", "站点"),
+    ("cell_id", "电芯"),
+    ("cell", "电芯"),
+    ("cell_index", "电芯"),
+)
+
+
+def _build_metric_context(plans: Any) -> Dict[str, Any]:
+    """从 db_query_plans 抽取"设备定位 + 时间起止"，给前端卡片顶部条带用。"""
+    device: Dict[str, Any] = {}
+    start_min: Optional[str] = None
+    end_max: Optional[str] = None
+    if isinstance(plans, list):
+        for plan in plans:
+            if not isinstance(plan, dict):
+                continue
+            filters = plan.get("filters") or {}
+            if isinstance(filters, dict) and not device:
+                for field, label in _DEVICE_FIELD_PRIORITY:
+                    val = filters.get(field)
+                    if val not in (None, "", [], {}):
+                        device = {"label": label, "field": field, "value": str(val)}
+                        break
+            tf = plan.get("time_filter") or {}
+            if isinstance(tf, dict):
+                s = tf.get("start_time")
+                e = tf.get("end_time")
+                if isinstance(s, str) and s.strip():
+                    if start_min is None or s < start_min:
+                        start_min = s
+                if isinstance(e, str) and e.strip():
+                    if end_max is None or e > end_max:
+                        end_max = e
+    return {
+        "device": device or None,
+        "time_range": {"start": start_min, "end": end_max} if (start_min or end_max) else None,
+    }
+
+
+def _aggregate_metric_value(rows: List[Dict[str, Any]], field: str, agg: str, opts: Optional[Dict[str, Any]] = None) -> Optional[Any]:
+    """聚合指令集：mean | max | min | sum | earliest | latest | distribution | count | count_eq。
+
+    返回 None 表示该字段无可用数据（前端不渲染该卡片）。
+    """
+    opts = opts or {}
+    if agg == "count":
+        return len(rows)
+    if agg in ("mean", "max", "min", "sum"):
+        vals = [_coerce_float(r.get(field)) for r in rows if isinstance(r, dict)]
+        vals = [v for v in vals if v is not None]
+        if not vals:
+            return None
+        if agg == "mean":
+            return round(sum(vals) / len(vals), 3)
+        if agg == "max":
+            return round(max(vals), 3)
+        if agg == "min":
+            return round(min(vals), 3)
+        return round(sum(vals), 3)
+    if agg in ("earliest", "latest"):
+        ts_vals = []
+        for r in rows:
+            v = r.get(field) if isinstance(r, dict) else None
+            if isinstance(v, str) and v.strip():
+                ts_vals.append(v.strip())
+        if not ts_vals:
+            return None
+        return min(ts_vals) if agg == "earliest" else max(ts_vals)
+    if agg == "distribution":
+        from collections import Counter
+        bucket = Counter()
+        for r in rows:
+            v = r.get(field) if isinstance(r, dict) else None
+            if v is None or (isinstance(v, str) and not v.strip()):
+                continue
+            bucket[str(v)] += 1
+        if not bucket:
+            return None
+        return dict(bucket.most_common())
+    if agg == "count_eq":
+        target = opts.get("value")
+        if target is None:
+            return None
+        cnt = 0
+        for r in rows:
+            v = r.get(field) if isinstance(r, dict) else None
+            if v is None:
+                continue
+            if str(v) == str(target) or _coerce_float(v) == _coerce_float(target):
+                cnt += 1
+        return cnt
+    return None
+
+
+# 字段在每张表的最小聚合规则（前端 METRIC_CARD_DEFS 持有展示元信息，这里只算值）
+# fields: [(field, primary_agg, secondary_agg|None, opts|None)]
+_METRIC_TABLE_RULES: Dict[str, Dict[str, Any]] = {
+    "bmu_data": {
+        "label": "BMU 时序",
+        "fields": [
+            ("soc",     "mean", "minmax", None),
+            ("soh",     "mean", "minmax", None),
+            ("voltage", "mean", "minmax", None),
+            ("current", "mean", "minmax", None),
+            ("temp",    "mean", "minmax", {"aliases": ["cell_avg_temp", "temperature"]}),
+        ],
+    },
+    "alarm_event": {
+        "label": "告警概览",
+        "fields": [
+            ("row_count",            "count", None, None),
+            ("average_severity",     "mean",  "max", None),
+            ("average_severity_max", "max",   None, {"source_field": "average_severity"}),
+        ],
+    },
+    "dcr_abnormal_cells": {
+        "label": "内阻异常",
+        "fields": [
+            ("data_days",            "max",      None,   None),
+            ("abnormal_days",        "max",      "mean", None),
+            ("period_r0_median_ohm", "mean",     None,   None),
+            ("period_iqr_ohm",       "mean",     None,   None),
+            ("first_abnormal_time",  "earliest", None,   None),
+            ("last_abnormal_time",   "latest",   None,   None),
+        ],
+    },
+    "isc_score_result": {
+        "label": "ISC 评分",
+        "fields": [
+            ("microshortscore",       "max",          "mean", {"aliases": ["microshort_score"]}),
+            ("microshortscore_pct",   "max",          None,   {"aliases": ["microshort_score_pct"]}),
+            ("diagnosis_result",      "distribution", None,   None),
+        ],
+    },
+    "capacity_inconsistent_cells": {
+        "label": "容量不一致",
+        "fields": [
+            ("direction",                  "distribution", None,   None),
+            ("has_self_discharge",         "count_eq",     None,   {"value": 1}),
+            ("maxvoltage_drop_rate_mvh",   "max",          None,   {"aliases": ["max_voltage_drop_rate_mvh"]}),
+            ("risk_warning_count",         "max",          None,   None),
+            ("confidence_score",           "mean",         None,   None),
+        ],
+    },
+    "volt_temp_abnormal_result": {
+        "label": "电压/温度异常",
+        "fields": [
+            ("row_count",     "count", None,   None),
+            ("delta_v",       "max",   "mean", None),
+            ("delta_t",       "max",   "mean", None),
+            ("v_max",         "max",   None,   None),
+            ("v_min",         "min",   None,   None),
+            ("t_max",         "max",   None,   None),
+            ("t_min",         "min",   None,   None),
+        ],
+    },
+}
+
+
+def _row_get_with_aliases(row: Dict[str, Any], field: str, aliases: Optional[List[str]] = None) -> Any:
+    """先按原字段名取，没有再按别名取（用规范化键再次匹配）。"""
+    if field in row:
+        return row[field]
+    norm_target = {_norm_field_key(field)}
+    for a in aliases or []:
+        norm_target.add(_norm_field_key(a))
+    if norm_target:
+        norm_map = {_norm_field_key(k): v for k, v in row.items()}
+        for nk in norm_target:
+            if nk in norm_map:
+                return norm_map[nk]
+    return None
+
+
+def _compute_field_value(rows: List[Dict[str, Any]], field: str, agg: str, opts: Optional[Dict[str, Any]] = None) -> Any:
+    """带别名兜底地聚合一个字段。
+
+    若 source_field 在行内缺失但有 aliases 命中，则把别名的值复制到 source_field
+    后再聚合，保证 _aggregate_metric_value 能按 source_field 取到值。
+    """
+    opts = opts or {}
+    aliases = opts.get("aliases") or []
+    source_field = opts.get("source_field") or field
+    if agg == "count":
+        return _aggregate_metric_value(rows, source_field, "count", opts)
+    normalized_rows: List[Dict[str, Any]] = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        if r.get(source_field) is not None:
+            normalized_rows.append(r)
+            continue
+        v = _row_get_with_aliases(r, source_field, aliases)
+        if v is None:
+            continue
+        nr = dict(r)
+        nr[source_field] = v
+        normalized_rows.append(nr)
+    if not normalized_rows:
+        return None
+    return _aggregate_metric_value(normalized_rows, source_field, agg, opts)
+
+
+def _build_metric_cards(route: str, plans: Any, raw_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """按 table_name 分桶 + 计算指标。返回 {"task_type", "context", "tables":[...]}.
+
+    每个 table 的 items 形如：
+      {"field": "soc", "primary_agg": "mean", "value": 82.3,
+       "secondary_agg": "minmax", "secondary": {"min":..,"max":..}}
+    前端拿到后用 METRIC_CARD_DEFS 套展示元信息（label/unit/icon/阈值）。
+    """
+    payload: Dict[str, Any] = {
+        "task_type": route or "direct",
+        "context": _build_metric_context(plans),
+        "tables": [],
+    }
+    if not isinstance(raw_rows, list) or not raw_rows:
+        return payload
+
+    by_table: Dict[str, List[Dict[str, Any]]] = {}
+    for r in raw_rows:
+        if not isinstance(r, dict) or r.get("error"):
+            continue
+        tname = str(r.get("table_name") or "").strip().lower()
+        if not tname:
+            continue
+        by_table.setdefault(tname, []).append(r)
+
+    for tname, rows in by_table.items():
+        if tname not in _METRIC_TABLE_RULES:
+            continue
+        rule = _METRIC_TABLE_RULES[tname]
+        items: List[Dict[str, Any]] = []
+        for field, agg, secondary_agg, opts in rule["fields"]:
+            value = _compute_field_value(rows, field, agg, opts)
+            item: Dict[str, Any] = {
+                "field": field,
+                "primary_agg": agg,
+                "value": value,
+            }
+            if secondary_agg:
+                if secondary_agg == "minmax":
+                    vmin = _compute_field_value(rows, field, "min", opts)
+                    vmax = _compute_field_value(rows, field, "max", opts)
+                    if vmin is not None and vmax is not None:
+                        item["secondary_agg"] = "minmax"
+                        item["secondary"] = {"min": vmin, "max": vmax}
+                else:
+                    sv = _compute_field_value(rows, field, secondary_agg, opts)
+                    if sv is not None:
+                        item["secondary_agg"] = secondary_agg
+                        item["secondary"] = sv
+            items.append(item)
+        payload["tables"].append({
+            "table": tname,
+            "label": rule["label"],
+            "row_count": len(rows),
+            "items": items,
+        })
+    return payload
+
+
 def _extract_structured_data(output: dict):
     """从 Agent 输出中提取结构化数据，填充 SHARED_STATE 的 Plus 字段。
 
@@ -1372,6 +1561,8 @@ def _extract_structured_data(output: dict):
     db_sqls = find_recursive(output, "db_executed_sqls")
     if isinstance(db_sqls, list):
         SHARED_STATE["executed_sqls"] = [str(s) for s in db_sqls if isinstance(s, str) and s.strip()]
+        if SHARED_STATE["executed_sqls"] and (SHARED_STATE.get("task_type") or "direct") == "direct":
+            SHARED_STATE["task_type"] = "station_device_td"
 
     db_evidence = find_recursive(output, "db_evidence_bundle")
     if isinstance(db_evidence, dict):
@@ -1389,43 +1580,64 @@ def _extract_structured_data(output: dict):
             tags.append({"text": "中置信度", "color": "orange"})
         SHARED_STATE["diagnosis_tags"] = tags
 
-    raw_rows = find_recursive(output, "raw_db_results")
+    raw_rows = find_recursive_any(output, ["raw_db_results", "db_raw_results"])
     if raw_rows and isinstance(raw_rows, list):
-        # 1) metrics: 收集所有非 null 数值 → 求均值
+        _dbg_stream(f"extract_structured_data: raw_rows={len(raw_rows)}")
+        if raw_rows and isinstance(raw_rows[0], dict):
+            _dbg_stream(
+                "extract_structured_data: first_row_keys="
+                + ",".join(sorted(list(raw_rows[0].keys()))[:20])
+            )
+        # 1) metrics: 字段名标准化后按别名归并，减少列名变化导致的漏识别
         from collections import defaultdict
         accum: dict[str, list] = defaultdict(list)
-        _METRIC_KEYS = ("soc", "soh", "voltage", "temperature", "current", "temp",
-                        "cell_avg_vol", "cell_avg_temp", "tmax", "tmin", "vmax", "vmin")
+        _METRIC_ALIASES: Dict[str, Tuple[str, ...]] = {
+            "soc": ("soc", "avgsoc", "socavg", "cellsoc"),
+            "soh": ("soh", "avgsoh", "sohavg", "cellsoh"),
+            "voltage": ("voltage", "packvoltage", "avgvoltage", "voltageavg", "cellavgvol", "vavg", "vmean"),
+            "temperature": ("temperature", "temp", "avgtemp", "tempavg", "cellavgtemp", "tavg", "tmean"),
+            "current": ("current", "packcurrent", "avgcurrent", "currentavg", "iavg", "imean"),
+            "alarm_count": ("alarmcount",),
+            # 保留扩展指标，前端未来可直接消费
+            "vmax": ("vmax", "maxvoltage"),
+            "vmin": ("vmin", "minvoltage"),
+            "tmax": ("tmax", "maxtemp", "maxtemperature"),
+            "tmin": ("tmin", "mintemp", "mintemperature"),
+        }
         for row in raw_rows:
             if not isinstance(row, dict):
                 continue
-            for key in _METRIC_KEYS:
-                val = row.get(key)
-                if val is None:
-                    val = row.get(key.upper())
-                if val is not None:
-                    try:
-                        accum[key.lower()].append(float(val))
-                    except (ValueError, TypeError):
-                        pass
-            if row.get("alarm_count") is not None:
-                try:
-                    accum["alarm_count"].append(float(row["alarm_count"]))
-                except (ValueError, TypeError):
-                    pass
+            normalized_numeric: Dict[str, float] = {}
+            for k, v in row.items():
+                fv = _coerce_float(v)
+                if fv is None:
+                    continue
+                nk = _norm_field_key(k)
+                if nk and nk not in normalized_numeric:
+                    normalized_numeric[nk] = fv
+            for metric_key, aliases in _METRIC_ALIASES.items():
+                for alias in aliases:
+                    if alias in normalized_numeric:
+                        accum[metric_key].append(normalized_numeric[alias])
+                        break
         metrics = {}
         for k, vals in accum.items():
             if vals:
                 metrics[k] = round(sum(vals) / len(vals), 3)
-        if "temp" in metrics and "temperature" not in metrics:
-            metrics["temperature"] = metrics.pop("temp")
         if metrics:
             SHARED_STATE["structured_metrics"] = metrics
+            _dbg_stream(f"extract_structured_data: structured_metrics_keys={sorted(list(metrics.keys()))}")
 
         # 2) 通用 SQL 表（station_device_td 用）
         sql_table = _build_sql_table(raw_rows)
         if sql_table.get("columns"):
             SHARED_STATE["sql_table"] = sql_table
+            _dbg_stream(
+                f"extract_structured_data: sql_table columns={len(sql_table.get('columns') or [])} "
+                f"rows={len(sql_table.get('rows') or [])} total={sql_table.get('total')}"
+            )
+            if (SHARED_STATE.get("task_type") or "direct") == "direct":
+                SHARED_STATE["task_type"] = "station_device_td"
 
         # 3) 按 db_route 归一化数据库三场景 task_type
         db_route = find_recursive(output, "db_route") or ""
@@ -1465,6 +1677,19 @@ def _extract_structured_data(output: dict):
                 SHARED_STATE["alarm_summary"] = _build_alarm_summary(alarm_rows)
                 # 同时把 task_type 校正为 alerting（兜底，防止 supervisor 没标对）
                 SHARED_STATE["task_type"] = "alerting"
+
+        # 5) Plus v3：按 task_type / 表 分桶聚合，生成指标卡片载荷（前端 renderMetricsGrid）
+        db_plans = find_recursive(output, "db_query_plans")
+        active_route = (SHARED_STATE.get("task_type") or "direct").strip().lower()
+        cards_payload = _build_metric_cards(active_route, db_plans, raw_rows)
+        if cards_payload.get("context") or cards_payload.get("tables"):
+            SHARED_STATE["metric_cards"] = cards_payload
+            _dbg_stream(
+                "extract_structured_data: metric_cards "
+                f"task_type={cards_payload.get('task_type')} "
+                f"tables={[{'table': t.get('table'), 'items': len(t.get('items') or [])} for t in (cards_payload.get('tables') or [])]} "
+                f"context={cards_payload.get('context')}"
+            )
 
 
 async def background_graph_runner(
@@ -1659,7 +1884,7 @@ async def background_graph_runner(
                                         f"\n   [{k}] ERROR: {block.get('error')}"
                                     )
 
-                    raw_rows = find_recursive(output, "raw_db_results")
+                    raw_rows = find_recursive_any(output, ["raw_db_results", "db_raw_results"])
                     if raw_rows and isinstance(raw_rows, list):
                         formatted_rows = []
                         for row in raw_rows:
@@ -1841,6 +2066,7 @@ async def api_chat(req: ChatRequest):
     SHARED_STATE["sql_table"] = {"columns": [], "rows": [], "title": ""}
     SHARED_STATE["executed_sqls"] = []
     SHARED_STATE["clarify_candidates"] = []
+    SHARED_STATE["metric_cards"] = {}
     SHARED_STATE["current_mode"] = req.mode
 
     prior_turns = _build_prior_turns(SHARED_STATE["chat_history"], max_pairs=5)
@@ -1899,8 +2125,16 @@ async def api_stream():
             sql_table = SHARED_STATE.get("sql_table") or {"columns": [], "rows": [], "title": ""}
             executed_sqls = SHARED_STATE.get("executed_sqls") or []
             clarify_candidates = SHARED_STATE.get("clarify_candidates") or []
+            metric_cards = SHARED_STATE.get("metric_cards") or {}
 
             if tick % 10 == 0:
+                _dbg_stream(
+                    "api_stream state tick "
+                    f"is_running={is_running} task_type={task_type} "
+                    f"sql_rows={len((sql_table or {}).get('rows') or [])} "
+                    f"metrics_keys={len(metrics or {})} "
+                    f"metric_tables={len((metric_cards or {}).get('tables') or [])}"
+                )
                 state_payload = {
                     "is_running": is_running,
                     "metrics": metrics,
@@ -1917,6 +2151,8 @@ async def api_stream():
                     "sql_table": sql_table,
                     "executed_sqls": executed_sqls,
                     "clarify_candidates": clarify_candidates,
+                    # --- Plus v3: 指标卡片（设备/时间上下文 + 按表聚合指标） ---
+                    "metric_cards": metric_cards,
                 }
                 yield f"event: state\ndata: {json.dumps(state_payload, ensure_ascii=False, default=str)}\n\n"
 
@@ -1942,7 +2178,14 @@ async def api_stream():
                     "sql_table": final_sql_table,
                     "executed_sqls": final_sqls,
                     "clarify_candidates": SHARED_STATE.get("clarify_candidates") or [],
+                    "metric_cards": SHARED_STATE.get("metric_cards") or {},
                 }
+                _dbg_stream(
+                    "api_stream final_state "
+                    f"task_type={final_state.get('task_type')} "
+                    f"sql_rows={len((final_state.get('sql_table') or {}).get('rows') or [])} "
+                    f"metric_tables={len((final_state.get('metric_cards') or {}).get('tables') or [])}"
+                )
                 yield f"event: state\ndata: {json.dumps(final_state, ensure_ascii=False, default=str)}\n\n"
 
                 if report and not response_saved:

@@ -77,7 +77,7 @@
     "category": "故障钻探",
     "mode": "fast",
     "question": "找出2026年3月的00256006001009006pack之下内阻异常超过5天的电芯数据",
-    "description": "dcr_abnormal_cells · 内阻异常电芯"
+    "description": "内阻异常电芯汇总表"
   },
   {
     "id": 11,
@@ -85,18 +85,26 @@
     "category": "故障钻探",
     "mode": "fast",
     "question": "列出 bmu_code='00256001001001001' 且 2026 年 3 月滑窗内 microshort_score 高于 0.6 的电芯，按分降序",
-    "description": "isc_score_result · ISC 评分筛选"
+    "description": "ISC 评分表"
   },
   {
     "id": 12,
     "category_id": "troubleshooting",
     "category": "故障钻探",
     "mode": "fast",
-    "question": "BMU 00256001001004002 里，电芯 31 容量不一致的异常原因、方向、置信度分别是什么？首次与最近一次判定时间各是什么时候？",
-    "description": "capacity_inconsistent_cells · 容量不一致"
+    "question": "今年以来，BMU 00256001001004002 里，电芯 31 容量不一致的异常原因、方向、置信度分别是什么？首次与最近一次判定时间各是什么时候？",
+    "description": "容量不一致电芯表"
   },
   {
     "id": 13,
+    "category_id": "station_device_td",
+    "category": "设备实时查询",
+    "mode": "fast",
+    "question": "查询当前设备状态",
+    "description": "缺少设备与时间时可触发候选澄清"
+  },
+  {
+    "id": 14,
     "category_id": "deep_research",
     "category": "深度检索",
     "mode": "deep",
@@ -104,7 +112,7 @@
     "description": "深度推理 · 图文证据 · 多智能体"
   },
   {
-    "id": 14,
+    "id": 15,
     "category_id": "deep_research",
     "category": "深度检索",
     "mode": "deep",
@@ -112,7 +120,7 @@
     "description": "深度推理 · 多模态证据"
   },
   {
-    "id": 15,
+    "id": 16,
     "category_id": "deep_research",
     "category": "深度检索",
     "mode": "deep",
@@ -120,7 +128,7 @@
     "description": "深度推理 · 经典阻抗故障"
   },
   {
-    "id": 16,
+    "id": 17,
     "category_id": "deep_research",
     "category": "深度检索",
     "mode": "deep",

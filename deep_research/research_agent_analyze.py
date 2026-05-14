@@ -236,6 +236,32 @@ def _apply_db_field_alias(table_name: str, field: str) -> str:
     return m.get(field, field)
 
 
+# 前端指标卡片依赖字段（用于 SQL select_fields 自动补齐）
+# 目标：即使 LLM 规划的 select_fields 合法但不完整，也能确保卡片所需字段被查询。
+CARD_REQUIRED_SELECT_FIELDS: Dict[str, List[str]] = {
+    "bmu_data": [
+        "soc", "soh", "voltage", "current", "temp", "cell_avg_temp",
+    ],
+    "alarm_event": [
+        "average_severity",
+    ],
+    "dcr_abnormal_cells": [
+        "data_days", "abnormal_days", "period_r0_median_ohm",
+        "period_iqr_ohm", "first_abnormal_time", "last_abnormal_time",
+    ],
+    "isc_score_result": [
+        "microshort_score", "microshort_score_pct", "diagnosis_result",
+    ],
+    "capacity_inconsistent_cells": [
+        "direction", "has_self_discharge", "max_voltage_drop_rate_mvh",
+        "risk_warning_count", "confidence_score",
+    ],
+    "volt_temp_abnormal_result": [
+        "delta_v", "delta_t", "v_max", "v_min", "t_max", "t_min",
+    ],
+}
+
+
 def _extract_json_object_str(text: str) -> str:
     """从 LLM 输出中截取第一个平衡花括号 JSON 对象，避免贪婪正则把多段内容拼进导致解析失败。"""
     if not text:
@@ -653,6 +679,17 @@ def _sanitize_plan(plan: Dict[str, Any], route: str) -> Dict[str, Any]:
     if not valid_select:
         valid_select = schema["default_select"]
         warnings.append("select_fields_empty_after_filter:use_default")
+
+    # 卡片字段兜底补齐：防止 select_fields 合法但不包含前端指标卡片依赖字段。
+    required_select = CARD_REQUIRED_SELECT_FIELDS.get(table_name, [])
+    appended_for_cards: List[str] = []
+    for field in required_select:
+        cf = _apply_db_field_alias(table_name, field)
+        if cf in schema["fields"] and cf not in valid_select:
+            valid_select.append(cf)
+            appended_for_cards.append(cf)
+    if appended_for_cards:
+        warnings.append(f"select_fields_auto_appended_for_cards:{appended_for_cards}")
 
     raw_filters = plan.get("filters")
     if not isinstance(raw_filters, dict):
@@ -1345,21 +1382,21 @@ async def retrieve_battery_node(state: AgentState):
                 "id": "troubleshooting_dcr",
                 "icon": "🔍",
                 "title": "故障钻探 · 内阻异常",
-                "desc": "查 dcr_abnormal_cells 内阻异常电芯汇总",
+                "desc": "查内阻异常电芯汇总表",
                 "hint": "请补充 pack/bmu 编码和时间范围",
             },
             {
                 "id": "troubleshooting_isc",
                 "icon": "🔍",
                 "title": "故障钻探 · ISC评分",
-                "desc": "查 isc_score_result 微短路/内短路评分",
+                "desc": "查 ISC 评分表（微短路/内短路评分）",
                 "hint": "请补充 bmu_code 和滑窗时间范围",
             },
             {
                 "id": "troubleshooting_cap",
                 "icon": "🔍",
                 "title": "故障钻探 · 容量不一致",
-                "desc": "查 capacity_inconsistent_cells 容量不一致电芯",
+                "desc": "查容量不一致电芯表",
                 "hint": "请补充 bmu_code 和电芯号",
             },
         ]

@@ -558,6 +558,8 @@ async def execute_tools_node(state: AgentState):
             updates["pre_brief_cases"] = current_context + f"\n\n【Local Knowledge Base Result】:\n{final_obs}"
             updates["supervisor_messages"] = [log_msg]
             updates["db_raw_results"] = current_db_rows if isinstance(current_db_rows, list) else []
+            # 显式保持任务类型，便于服务端 SSE 在流式阶段即按 kb_retrieval 组装图文报告
+            updates["task_type"] = "kb_retrieval"
 
         except Exception as e:
             print(f"[Tool Error] Retrieval failed: {e}")
@@ -626,16 +628,28 @@ async def solve_simple_task(state: AgentState, writer=None) -> dict:
         "4. 输出纯文本，不要包含任何 JSON 格式。"
         '5. 若用户提及"以上/上面/之前"等代词，请结合对话历史正确理解其指代。'
     )
+    if route == "RETRIEVE" or task_type == "kb_retrieval":
+        system_instruction += (
+            "\n\n【知识库检索回答要求】"
+            "1. 回答必须自包含，直接把结论、原因和适用条件讲清楚；"
+            "禁止使用“如附录所示”“见证据面板”“请参考图片/材料”等把答案交给用户自行查找的表达。"
+            "2. 不要逐条复述检索片段，要先归纳成可执行、可理解的答案，再简要说明依据来自哪些证据。"
+            "3. 如果确实引用图片，必须先用文字说明图片支持了什么结论；没有直接帮助的图片不要提。"
+            "4. 若证据不足以回答某个细节，应明确说明不足，并给出还需要补充的信息，不要硬推断。"
+        )
     if use_direct_demo_few_shots:
         fs = simple_direct_demo_few_shots
         if isinstance(fs, str) and fs.strip():
             system_instruction = system_instruction + "\n\n" + fs.strip()
 
-    closing = (
-        "基于以上信息，生成精炼回答。"
-        if use_direct_demo_few_shots
-        else "基于以上信息，生成一份精炼的诊断报告。"
-    )
+    if route == "RETRIEVE" or task_type == "kb_retrieval":
+        closing = "基于以上知识库证据，生成一份自包含、直接可读的回答。"
+    else:
+        closing = (
+            "基于以上信息，生成精炼回答。"
+            if use_direct_demo_few_shots
+            else "基于以上信息，生成一份精炼的诊断报告。"
+        )
     # 定义用户提示
     user_prompt = (
         f"用户查询:\n{messages_str}\n\n"
@@ -716,7 +730,9 @@ async def solve_simple_task(state: AgentState, writer=None) -> dict:
 
     return {
         "final_report": final_answer,
-        "supervisor_messages": state.get("supervisor_messages", []) + ["Simple task resolved via RPO."]
+        "supervisor_messages": state.get("supervisor_messages", []) + ["Simple task resolved via RPO."],
+        # 透传 task_type，否则 server_plus 的 SHARED_STATE 在流式结束前一直为 direct，图文无法拼进回答
+        "task_type": (state.get("task_type") or "direct"),
     }
 
 

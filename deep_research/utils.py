@@ -940,7 +940,7 @@ def ingest_local_documents(
 @tool(parse_docstring=True)
 def local_search(
     query: str,
-    top_k: Annotated[int, InjectedToolArg] = 3
+    top_k: Annotated[int, InjectedToolArg] = 5
 ) -> str:
     """Search local Chroma+BM25 knowledge bases and summarize results.
 

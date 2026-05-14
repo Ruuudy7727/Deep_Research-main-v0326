@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>科宝 Cobot</title>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -249,11 +252,45 @@ body[data-sidebar="collapsed"] .new-chat-btn { padding: 10px; justify-content: c
   background: var(--card); padding: 14px 16px;
   border-radius: var(--radius-sm); border: 1px solid var(--border-light);
   cursor: pointer; transition: all 0.15s;
+  position: relative;
+  overflow: visible;
 }
 .empty-card:hover { border-color: var(--primary); transform: translateY(-2px); box-shadow: var(--shadow-md); }
 .empty-card-icon { font-size: 20px; margin-bottom: 6px; }
 .empty-card-title { font-size: 13px; font-weight: 700; color: var(--text-primary); margin-bottom: 2px; }
 .empty-card-desc { font-size: 11.5px; color: var(--text-muted); line-height: 1.5; }
+.empty-card-tooltip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%) translateY(6px);
+  min-width: 220px;
+  max-width: 320px;
+  padding: 10px 12px;
+  border-radius: var(--radius-xs);
+  background: #0F172A;
+  color: #E2E8F0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 20;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.empty-card-tooltip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: #0F172A;
+}
+.empty-card:hover .empty-card-tooltip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
 
 /* ========== Clarify Candidates ========== */
 .clarify-section { margin-top: 16px; }
@@ -487,6 +524,19 @@ body[data-sidebar="collapsed"] .new-chat-btn { padding: 10px; justify-content: c
 .kb-evi-thumb img { width: 100%; height: 100%; object-fit: cover; }
 
 /* ========== SQL Chart Card ========== */
+.metric-ctx-strip {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin: 0 0 12px 0;
+}
+.metric-ctx-strip .ctx-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 14px;
+  background: var(--blue-bg); color: var(--text-primary);
+  font-size: 12px; font-weight: 500;
+  border: 1px solid rgba(0,0,0,0.04);
+}
+.metric-ctx-strip .ctx-pill-k { color: var(--text-muted); }
+.metric-ctx-strip .ctx-pill-v { color: var(--text-primary); font-weight: 600; }
 .metrics-grid {
   display: grid; gap: 10px;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -786,11 +836,24 @@ body.resizing-rail .rail-resize-handle::after {
   font-size: 11.5px; font-weight: 600; color: var(--text-primary);
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.ev-card-title {
+  margin-top: 6px; font-size: 12px; font-weight: 700; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ev-card-meta {
+  margin-top: 4px; font-size: 10.5px; color: var(--text-muted);
+}
 .ev-card-snippet {
   font-size: 11.5px; color: var(--text-secondary); line-height: 1.55;
   margin-top: 4px;
   display: -webkit-box; -webkit-box-orient: vertical;
   -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
+}
+.ev-card-snippet .katex-display,
+.md-body .katex-display {
+  margin: 0.35em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 .ev-card-thumb {
   margin-top: 8px; width: 100%; max-height: 120px;
@@ -1253,7 +1316,7 @@ body.lb-locked { overflow: hidden; }
       <button class="toolbar-action" onclick="toggleLayoutTuner()">🎛️ 布局调节</button>
       <div class="examples-dd" id="examplesDropdown">
         <div class="examples-dd-hd">
-          <span>📋 示例问题清单 — 点击即可填入</span>
+          <span>📋 示例问题清单</span>
           <button class="examples-dd-close" onclick="toggleExamples()">✕</button>
         </div>
         <div class="examples-list" id="examplesList"></div>
@@ -1272,7 +1335,7 @@ body.lb-locked { overflow: hidden; }
             <span>右侧面板宽度</span>
             <span class="range-val" id="railWidthVal">360px</span>
           </div>
-          <input type="range" id="railWidthRange" min="280" max="520" step="2" value="360" oninput="setRailWidth(this.value)">
+          <input type="range" id="railWidthRange" min="280" max="720" step="2" value="360" oninput="setRailWidth(this.value)">
         </div>
         <div class="layout-tuner-ft">
           <button class="toolbar-action" onclick="resetLayoutSize()">恢复默认</button>
@@ -1374,6 +1437,19 @@ const ALARM_CHIP_CLASS = {
   '一致性异常':   'chip-cons',
 };
 
+const FEATURE_HOVER_INTRO = {
+  direct: '快速回答业务与产品问题，帮助界定系统能力边界。',
+  kb_retrieval: '多文档图文证据联查，支持概念解释、流程溯源与案例归纳。',
+  station_device_td: '面向站点运行数据，支持时序指标查询、趋势可视化与状态快照。',
+  alerting: '基于告警事件进行关键词归纳、类型聚类和严重度排序。',
+  troubleshooting: '融合机理与数据驱动，联查内阻异常电芯汇总表、ISC 评分表、容量不一致电芯表，进行根因定位与风险评估。',
+  deep_research: '多智能体深度推理，结合证据链输出可解释结论与建议。',
+};
+
+const FEATURE_CARD_BRIEF = {
+  troubleshooting: '内阻异常电芯汇总表 · ISC 评分表 · 容量不一致电芯表',
+};
+
 // ==========================================
 // State
 // ==========================================
@@ -1391,6 +1467,17 @@ let cardState = new Map();
 let activeTaskType = 'direct';
 let activeCardId = null;
 const LAYOUT_PREF_KEY = 'cobot_layout_pref_v1';
+// Frontend debug switch:
+// 1) URL: ?debug_stream=1
+// 2) localStorage.setItem('cobot_debug_stream', '1')
+const DEBUG_STREAM = (
+  new URLSearchParams(window.location.search).get('debug_stream') === '1' ||
+  localStorage.getItem('cobot_debug_stream') === '1'
+);
+function dbgStream(...args) {
+  if (!DEBUG_STREAM) return;
+  console.log('[COBOT_DEBUG]', ...args);
+}
 
 // ==========================================
 // Time
@@ -1495,6 +1582,7 @@ function renderRail(tt) {
     ).join('');
     if (active === 'data') bodyEl.innerHTML = renderRailDataTab(cs);
     else bodyEl.innerHTML = renderRailSqlTab(cs);
+    renderMathSafely(bodyEl);
     return;
   }
 
@@ -1512,6 +1600,7 @@ function renderRail(tt) {
     if (active === 'sql') bodyEl.innerHTML = renderRailSqlTab(cs);
     else if (active === 'data') bodyEl.innerHTML = renderRailDataTab(cs);
     else bodyEl.innerHTML = renderAlarmCapabilityRail();
+    renderMathSafely(bodyEl);
     return;
   }
 
@@ -1527,8 +1616,8 @@ function renderRail(tt) {
     tabsEl.innerHTML = tabs.map(t =>
       `<div class="rail-tab ${t.id===active?'active':''}" onclick="setRailTab('${t.id}')">${t.label}${t.count !== undefined ? ` <span style="opacity:0.6;">(${t.count})</span>` : ''}</div>`
     ).join('');
-    if (active === 'sql') { bodyEl.innerHTML = renderRailSqlTab(cs); return; }
-    if (active === 'data') { bodyEl.innerHTML = renderRailDataTab(cs); return; }
+    if (active === 'sql') { bodyEl.innerHTML = renderRailSqlTab(cs); renderMathSafely(bodyEl); return; }
+    if (active === 'data') { bodyEl.innerHTML = renderRailDataTab(cs); renderMathSafely(bodyEl); return; }
     const summary = cs.diagnosis_summary || '';
     const tags = cs.diagnosis_tags || [];
     let topHtml = '';
@@ -1539,6 +1628,7 @@ function renderRail(tt) {
       topHtml += `<div class="diag-rail-card"><div class="diag-rail-card-title">置信度</div><div class="diag-rail-card-body">${tags.map(t=>`<span class="tag tag-${t.color||'blue'}" style="margin-right:4px;">${esc(t.text)}</span>`).join('')}</div></div>`;
     }
     bodyEl.innerHTML = topHtml + renderEvidenceList(ev);
+    renderMathSafely(bodyEl);
     return;
   }
 
@@ -1557,6 +1647,7 @@ function renderRail(tt) {
   if (activeRailTab === 'text') filtered = ev.filter(x => x.kind !== 'image');
   if (activeRailTab === 'image') filtered = ev.filter(x => (x.image_urls||[]).length > 0);
   bodyEl.innerHTML = renderEvidenceList(filtered);
+  renderMathSafely(bodyEl);
 }
 
 let railActiveTab = 'all';
@@ -1573,14 +1664,19 @@ function renderEvidenceList(list) {
     const score = Math.round((Number(ev.score)||0) * 100);
     const sourceLabel = ev.source_label || ev.source || '';
     const thumb = (ev.image_urls||[])[0];
+    const title = ev.snippet_title || sourceLabel || '知识库文档';
+    const summary = ev.snippet_summary || ev.chunk_text || '';
+    const imageCount = (ev.image_urls || []).length;
     return `
       <div class="ev-card" onclick="copyText('${escAttr(ev.chunk_text||'')}')">
         <div class="ev-card-hd">
-          <span class="ev-card-tag">证据 ${ev.idx} · ${ev.kind === 'image' ? '图片' : '文档'}</span>
+          <span class="ev-card-tag">证据 ${ev.idx} · ${imageCount ? '图文' : '文档'}</span>
           <span class="ev-card-score">${score}%</span>
         </div>
         <div class="ev-card-source" title="${escAttr(ev.source||'')}">📄 ${esc(sourceLabel)}</div>
-        ${ev.chunk_text ? `<div class="ev-card-snippet">${esc(ev.chunk_text)}</div>` : ''}
+        <div class="ev-card-title" title="${escAttr(title)}">${esc(title)}</div>
+        ${summary ? `<div class="ev-card-snippet">${esc(summary)}</div>` : ''}
+        <div class="ev-card-meta">${imageCount ? `含 ${imageCount} 张强绑定图片 · ` : ''}点击复制原始证据片段</div>
         ${thumb ? `<img class="ev-card-thumb" src="${escAttr(thumb)}" alt="evidence">` : ''}
       </div>`;
   }).join('');
@@ -1593,7 +1689,7 @@ function renderRailSqlTab(cs) {
     <div class="sql-item" style="margin-bottom:10px;">
       <div class="sql-item-hd">
         <div class="sql-item-title">SQL ${i + 1}</div>
-        <button class="sql-copy-btn" onclick="copySqlText(decodeURIComponent('${encodeURIComponent(String(s))}'))">复制</button>
+        <button type="button" class="sql-copy-btn" data-sql="${escAttr(encodeURIComponent(String(s)))}" onclick="copySqlFromBtn(this)">复制</button>
       </div>
       <pre style="margin:0;"><code>${esc(String(s))}</code></pre>
     </div>`).join('');
@@ -1604,10 +1700,12 @@ function renderRailDataTab(cs) {
   if (!tbl.columns || !tbl.columns.length || !tbl.rows || !tbl.rows.length) {
     return '<div class="rail-empty"><div class="rail-empty-icon">📋</div>暂无数据</div>';
   }
+  const totalRows = Number(tbl.total) || tbl.rows.length;
   const maxRows = Math.min(tbl.rows.length, 500);
+  const totalLabel = totalRows > 500 ? '500+' : String(totalRows);
   return `
     <div class="rail-data-info" style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">
-      显示 ${maxRows} / ${tbl.total || tbl.rows.length} 行 · ${tbl.columns.length} 列
+      显示 ${maxRows} / ${totalLabel} 行 · ${tbl.columns.length} 列
     </div>
     <div class="sql-table-scroll" style="display:block;max-height:calc(100vh - 220px);">
       <table>
@@ -1739,11 +1837,14 @@ function renderEmptyCards() {
   }
   root.innerHTML = picks.map(q => {
     const meta = TASK_TYPE_META[q.category_id] || TASK_TYPE_META.direct;
+    const intro = FEATURE_HOVER_INTRO[q.category_id] || q.description || q.question;
+    const brief = FEATURE_CARD_BRIEF[q.category_id] || q.description || q.question;
     return `
       <div class="empty-card" onclick="selectExample(${exampleQuestions.indexOf(q)})">
         <div class="empty-card-icon">${meta.icon}</div>
         <div class="empty-card-title">${esc(q.category)}</div>
-        <div class="empty-card-desc">${esc(q.description || q.question)}</div>
+        <div class="empty-card-desc">${esc(brief)}</div>
+        <div class="empty-card-tooltip">${esc(intro)}</div>
       </div>`;
   }).join('');
 }
@@ -1799,7 +1900,7 @@ function setAiBoxWidth(percent, persist = true) {
 }
 
 function setRailWidth(px, persist = true) {
-  const val = clampNum(px, 280, 520);
+  const val = clampNum(px, 280, 720);
   document.documentElement.style.setProperty('--rail-width', `${val}px`);
   const v = document.getElementById('railWidthVal');
   if (v) v.textContent = `${val}px`;
@@ -1956,6 +2057,7 @@ function addAIThinking() {
     alarm_rows: [], alarm_summary: {},
     sql_table: { columns: [], rows: [] },
     executed_sqls: [],
+    metric_cards: null,
     kb_images: [], mode: currentMode,
   });
   const area = document.getElementById('chatArea');
@@ -1989,7 +2091,9 @@ function rerenderCard(cardId) {
   const card = document.getElementById(cardId);
   if (!card) return;
   const cs = cardState.get(cardId) || {};
-  const tt = cs.task_type || 'direct';
+  const tt = inferTaskType(cs);
+  cs.task_type = tt;
+  cardState.set(cardId, cs);
   card.dataset.taskType = tt;
   const meta = TASK_TYPE_META[tt] || TASK_TYPE_META.direct;
   const modeTag = `<span class="tag tag-blue">${cs.mode === 'deep' ? '专家模式' : '快速模式'}</span>`;
@@ -2015,6 +2119,7 @@ function rerenderCard(cardId) {
       <button class="card-act-btn" onclick="downloadReport()">📥 导出 HTML 报告</button>
     </div>`;
   card.innerHTML = headerH + bodyH + footerH;
+  renderMathSafely(card);
   scrollBot();
 }
 
@@ -2119,7 +2224,8 @@ function renderSqlChartCard(cs) {
         <div class="md-body">${renderMd(text)}</div>
       </div>`;
   }
-  let metricsH = renderMetricsGrid(cs);
+  const ctxH = renderMetricContextStrip(cs.metric_cards && cs.metric_cards.context);
+  let metricsH = ctxH + renderMetricsGrid(cs);
   let chartH = '';
   chartH = `
     <div class="chart-card">
@@ -2134,6 +2240,40 @@ function renderSqlChartCard(cs) {
       }</div>
     </div>`;
   let sqlH = '';
+  const sqls = Array.isArray(cs.executed_sqls) ? cs.executed_sqls.filter(s => String(s||'').trim()) : [];
+  const tbl = cs.sql_table || {};
+  if (sqls.length || (tbl.columns && tbl.columns.length && tbl.rows && tbl.rows.length)) {
+    const previewRows = Math.min((tbl.rows || []).length, 8);
+    sqlH = `
+      <div class="ai-card-section">
+        <div class="ai-card-section-title"><span class="icon">🧾</span><span>SQL 查库预览</span></div>
+        ${sqls.length ? `
+          <div class="sql-quick-list">
+            ${sqls.slice(0, 2).map((s, i) => `
+              <div class="sql-item" style="margin-bottom:8px;">
+                <div class="sql-item-hd">
+                  <div class="sql-item-title">SQL ${i + 1}</div>
+                </div>
+                <pre style="margin:0;"><code>${esc(String(s))}</code></pre>
+              </div>`).join('')}
+            ${sqls.length > 2 ? `<div style="font-size:11px;color:var(--text-muted);">其余 ${sqls.length - 2} 条 SQL 请在右侧 SQL 面板查看</div>` : ''}
+          </div>` : ''}
+        ${(tbl.columns && tbl.columns.length && tbl.rows && tbl.rows.length) ? `
+          <div style="margin-top:${sqls.length ? '10px' : '0'};">
+            <div class="rail-data-info" style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">
+              数据预览 ${previewRows} / ${tbl.total || tbl.rows.length} 行 · ${tbl.columns.length} 列
+            </div>
+            <div class="sql-table-scroll" style="display:block;max-height:260px;">
+              <table>
+                <thead><tr>${tbl.columns.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+                <tbody>${tbl.rows.slice(0, previewRows).map(r =>
+                  `<tr>${r.map(v => `<td>${esc(formatCell(v))}</td>`).join('')}</tr>`
+                ).join('')}</tbody>
+              </table>
+            </div>
+          </div>` : ''}
+      </div>`;
+  }
   let analysisH = '';
   if (cs.report && cs.report.trim()) {
     const sections = parseSections(cs.report);
@@ -2169,69 +2309,193 @@ function renderSqlChartCard(cs) {
   return `<div class="ai-card-body">${summaryH}${metricsH}${chartH}${sqlH}</div>${analysisH}${clarifyH}`;
 }
 
-function _colStats(tbl, colRegex) {
-  if (!tbl || !tbl.columns || !tbl.rows || !tbl.rows.length) return null;
-  const idx = tbl.columns.findIndex(c => colRegex.test(c));
-  if (idx < 0) return null;
-  const vals = tbl.rows.map(r => Number(r[idx])).filter(v => Number.isFinite(v));
-  if (!vals.length) return null;
-  const min = Math.min(...vals), max = Math.max(...vals);
-  const mean = vals.reduce((a,b) => a+b, 0) / vals.length;
-  return { min, max, mean, range: max - min, count: vals.length };
+// ==========================================
+// 指标卡片：按 task_type / 表 渲染（Plus v3）
+// ==========================================
+// 每个 field 的展示元信息：label/unit/icon + thresholds（阈值染色）
+// 后端 _build_metric_cards 已按表分桶并算好 primary/secondary 值，前端只负责展示。
+const METRIC_CARD_DEFS = {
+  bmu_data: [
+    { field: 'soc',     label: 'SOC',   unit: '%',   icon: '🔋', iconBg: 'var(--green-bg)',  iconFg: 'var(--green)',
+      thresholds: [ {lt: 20, status: 'danger', st: '低'}, {lt: 50, status: 'warning', st: '偏低'}, {status: 'normal', st: '正常'} ] },
+    { field: 'soh',     label: 'SOH',   unit: '%',   icon: '✅', iconBg: 'var(--green-bg)',  iconFg: 'var(--green)',
+      thresholds: [ {gt: 80, status: 'normal', st: '稳定'}, {status: 'warning', st: '老化'} ] },
+    { field: 'voltage', label: '电压', unit: 'V',   icon: '⚡', iconBg: 'var(--blue-bg)',   iconFg: 'var(--blue)',
+      thresholds: [ {status: 'stable', st: '均值'} ] },
+    { field: 'current', label: '电流', unit: 'A',   icon: '🔌', iconBg: 'var(--purple-bg)', iconFg: 'var(--purple)',
+      thresholds: [ {status: 'info',  st: '均值'} ] },
+    { field: 'temp',    label: '温度', unit: '°C',  icon: '🌡️', iconBg: 'var(--orange-bg)', iconFg: 'var(--orange)',
+      thresholds: [ {gt: 45, status: 'danger', st: '过高'}, {status: 'stable', st: '正常'} ] },
+  ],
+  alarm_event: [
+    { field: 'row_count',            label: '告警条数',    unit: '条',   icon: '🔢', iconBg: 'var(--orange-bg)', iconFg: 'var(--orange)',
+      thresholds: [ {ge: 100, status: 'danger', st: '密集'}, {ge: 10, status: 'warning', st: '关注'}, {status: 'normal', st: '少量'} ] },
+    { field: 'average_severity',     label: '平均严重度',  unit: '/5',   icon: '📐', iconBg: 'var(--purple-bg)', iconFg: 'var(--purple)',
+      thresholds: [ {ge: 4, status: 'danger', st: '高风险'}, {ge: 2, status: 'warning', st: '中风险'}, {status: 'normal', st: '较低'} ] },
+    { field: 'average_severity_max', label: '最大严重度',  unit: '/5',   icon: '📛', iconBg: 'var(--red-bg)',    iconFg: 'var(--red)',
+      thresholds: [ {ge: 4, status: 'danger', st: '高风险'}, {ge: 2, status: 'warning', st: '中风险'}, {status: 'normal', st: '较低'} ] },
+  ],
+  dcr_abnormal_cells: [
+    { field: 'data_days',            label: '覆盖天数',  unit: '天',   icon: '🗓️', iconBg: 'var(--blue-bg)',    iconFg: 'var(--blue)' },
+    { field: 'abnormal_days',        label: '异常天数',  unit: '天',   icon: '⚠️', iconBg: 'var(--orange-bg)',  iconFg: 'var(--orange)',
+      thresholds: [ {ge: 5, status: 'danger', st: '频发'}, {ge: 1, status: 'warning', st: '偶发'}, {status: 'normal', st: '少'} ] },
+    { field: 'period_r0_median_ohm', label: 'R0 中位数', unit: 'Ω',    icon: '📏', iconBg: 'var(--purple-bg)',  iconFg: 'var(--purple)' },
+    { field: 'period_iqr_ohm',       label: 'R0 IQR',    unit: 'Ω',    icon: '📐', iconBg: 'var(--purple-bg)',  iconFg: 'var(--purple)' },
+    { field: 'first_abnormal_time',  label: '首次异常',  type: 'time', icon: '🕒', iconBg: 'var(--blue-bg)',    iconFg: 'var(--blue)' },
+    { field: 'last_abnormal_time',   label: '最近异常',  type: 'time', icon: '🕔', iconBg: 'var(--orange-bg)',  iconFg: 'var(--orange)' },
+  ],
+  isc_score_result: [
+    { field: 'microshortscore',     label: 'ISC 评分',   unit: '',   icon: '🧪', iconBg: 'var(--red-bg)',    iconFg: 'var(--red)',
+      thresholds: [ {gt: 0.75, status: 'danger', st: '确诊'}, {gt: 0.6, status: 'warning', st: '疑似'}, {status: 'normal', st: '正常'} ] },
+    { field: 'microshortscore_pct', label: '严重度分位', unit: '',   icon: '📈', iconBg: 'var(--purple-bg)', iconFg: 'var(--purple)',
+      thresholds: [ {gt: 0.9, status: 'danger', st: '高风险'}, {gt: 0.6, status: 'warning', st: '靠前'}, {status: 'normal', st: '普通'} ] },
+    { field: 'diagnosis_result',    label: '诊断分布',   type: 'dist', icon: '🏷️', iconBg: 'var(--blue-bg)',  iconFg: 'var(--blue)',
+      highlight: { '确诊': 'danger', '疑似': 'warning', '正常': 'normal' } },
+  ],
+  capacity_inconsistent_cells: [
+    { field: 'direction',                label: '异常方向',     type: 'dist', icon: '🧭', iconBg: 'var(--blue-bg)',   iconFg: 'var(--blue)',
+      highlight: { '高': 'warning', '低': 'danger' } },
+    { field: 'has_self_discharge',       label: '自放电电芯',   unit: '颗',  icon: '🪫', iconBg: 'var(--orange-bg)', iconFg: 'var(--orange)',
+      thresholds: [ {ge: 1, status: 'warning', st: '存在'}, {status: 'normal', st: '无'} ] },
+    { field: 'maxvoltage_drop_rate_mvh', label: '最大压降率',   unit: 'mV/h',icon: '📉', iconBg: 'var(--red-bg)',    iconFg: 'var(--red)',
+      thresholds: [ {gt: 5, status: 'danger', st: '高'}, {gt: 1, status: 'warning', st: '偏高'}, {status: 'normal', st: '低'} ] },
+    { field: 'risk_warning_count',       label: '风险预警次数', unit: '次',  icon: '🚨', iconBg: 'var(--orange-bg)', iconFg: 'var(--orange)',
+      thresholds: [ {gt: 3, status: 'danger', st: '频发'}, {gt: 0, status: 'warning', st: '关注'}, {status: 'normal', st: '少'} ] },
+    { field: 'confidence_score',         label: '置信度',       unit: '',    icon: '✅', iconBg: 'var(--green-bg)',  iconFg: 'var(--green)' },
+  ],
+  volt_temp_abnormal_result: [
+    { field: 'row_count', label: '异常条数', unit: '条',  icon: '🔢', iconBg: 'var(--orange-bg)', iconFg: 'var(--orange)' },
+    { field: 'delta_v',   label: '最大压差', unit: 'V',   icon: '⚡', iconBg: 'var(--purple-bg)', iconFg: 'var(--purple)' },
+    { field: 'delta_t',   label: '最大温差', unit: '°C',  icon: '🌡️', iconBg: 'var(--orange-bg)', iconFg: 'var(--orange)' },
+    { field: 'v_max',     label: 'V 最大',   unit: 'V',   icon: '🔺', iconBg: 'var(--blue-bg)',   iconFg: 'var(--blue)' },
+    { field: 'v_min',     label: 'V 最小',   unit: 'V',   icon: '🔻', iconBg: 'var(--blue-bg)',   iconFg: 'var(--blue)' },
+    { field: 't_max',     label: 'T 最大',   unit: '°C',  icon: '🔺', iconBg: 'var(--orange-bg)', iconFg: 'var(--orange)' },
+    { field: 't_min',     label: 'T 最小',   unit: '°C',  icon: '🔻', iconBg: 'var(--orange-bg)', iconFg: 'var(--orange)' },
+  ],
+};
+
+function _pickThreshold(thresholds, value) {
+  if (!thresholds || !thresholds.length) return { status: 'info', st: '' };
+  const v = Number(value);
+  for (const t of thresholds) {
+    if (t.lt !== undefined) { if (Number.isFinite(v) && v < t.lt) return t; continue; }
+    if (t.gt !== undefined) { if (Number.isFinite(v) && v > t.gt) return t; continue; }
+    if (t.le !== undefined) { if (Number.isFinite(v) && v <= t.le) return t; continue; }
+    if (t.ge !== undefined) { if (Number.isFinite(v) && v >= t.ge) return t; continue; }
+    return t;
+  }
+  return { status: 'info', st: '' };
+}
+
+function _fmtMetricNumber(v) {
+  if (v === null || v === undefined || v === '') return '—';
+  const n = Number(v);
+  if (Number.isFinite(n)) return Math.abs(n) >= 100 ? n.toFixed(0) : n.toFixed(2);
+  return String(v);
+}
+
+function _fmtMetricTime(v) {
+  if (!v) return '—';
+  return String(v);
+}
+
+function _fmtSecondary(item, def) {
+  if (!item || item.secondary === undefined || item.secondary === null) return '';
+  if (item.secondary_agg === 'minmax' && typeof item.secondary === 'object') {
+    return `${_fmtMetricNumber(item.secondary.min)} ~ ${_fmtMetricNumber(item.secondary.max)}${def.unit || ''}`;
+  }
+  if (item.secondary_agg === 'mean') return `均值 ${_fmtMetricNumber(item.secondary)}${def.unit || ''}`;
+  if (item.secondary_agg === 'max')  return `最大 ${_fmtMetricNumber(item.secondary)}${def.unit || ''}`;
+  return '';
+}
+
+function _renderMetricCardOne(item, def) {
+  if (!item || item.value === null || item.value === undefined || item.value === '') return '';
+  if (def.type === 'dist') {
+    if (typeof item.value !== 'object') return '';
+    const entries = Object.entries(item.value);
+    if (!entries.length) return '';
+    const chips = entries.map(([k, v]) => {
+      const status = (def.highlight && def.highlight[k]) || 'info';
+      return `<span class="metric-status status-${status}" style="margin:2px 4px 0 0;">${esc(k)} ${v}</span>`;
+    }).join('');
+    return `
+      <div class="metric-card">
+        <div class="metric-icon" style="background:${def.iconBg};color:${def.iconFg};">${def.icon || '📊'}</div>
+        <div class="metric-label">${esc(def.label)}</div>
+        <div class="metric-value" style="font-size:13px;line-height:1.6;font-weight:500;">${chips}</div>
+      </div>`;
+  }
+  if (def.type === 'time') {
+    return `
+      <div class="metric-card">
+        <div class="metric-icon" style="background:${def.iconBg};color:${def.iconFg};">${def.icon || '🕒'}</div>
+        <div class="metric-label">${esc(def.label)}</div>
+        <div class="metric-value" style="font-size:13px;">${esc(_fmtMetricTime(item.value))}</div>
+      </div>`;
+  }
+  const th = _pickThreshold(def.thresholds, item.value);
+  const numberLabel = _fmtMetricNumber(item.value);
+  const secondary = _fmtSecondary(item, def);
+  return `
+    <div class="metric-card">
+      <div class="metric-icon" style="background:${def.iconBg};color:${def.iconFg};">${def.icon || '📊'}</div>
+      <div class="metric-label">${esc(def.label)}</div>
+      <div class="metric-value">${esc(numberLabel)}<span class="metric-unit">${esc(def.unit || '')}</span></div>
+      ${secondary ? `<div class="metric-secondary" style="font-size:11px;color:var(--text-muted);margin-top:2px;">${esc(secondary)}</div>` : ''}
+      ${th && th.st ? `<span class="metric-status status-${th.status}">${esc(th.st)}</span>` : ''}
+    </div>`;
+}
+
+function renderMetricContextStrip(ctx) {
+  if (!ctx) return '';
+  const dev = ctx.device;
+  const tr = ctx.time_range;
+  if (!dev && !tr) return '';
+  const devH = dev
+    ? `<span class="ctx-pill"><span class="ctx-pill-k">${esc(dev.label || '设备')}</span><span class="ctx-pill-v">${esc(dev.value)}</span></span>`
+    : '';
+  const timeH = tr
+    ? `<span class="ctx-pill"><span class="ctx-pill-k">时间</span><span class="ctx-pill-v">${esc(tr.start || '—')} ~ ${esc(tr.end || '—')}</span></span>`
+    : '';
+  return `<div class="metric-ctx-strip">${devH}${timeH}</div>`;
 }
 
 function renderMetricsGrid(cs) {
-  const items = [];
-  const m = cs.metrics || {};
-  const tbl = cs.sql_table || {};
-
-  const _METRIC_DEFS = [
-    { key: 'soc',         colRe: /^soc$/i,             icon: '🔋', bg: 'var(--green-bg)',  fg: 'var(--green)',  label: 'SOC',  unit: '%',
-      statusFn: v => v < 20 ? 'danger' : (v < 50 ? 'warning' : 'normal'),
-      stFn:     v => v < 50 ? '异常' : '正常' },
-    { key: 'soh',         colRe: /^soh$/i,             icon: '✅', bg: 'var(--green-bg)',  fg: 'var(--green)',  label: 'SOH',  unit: '%',
-      statusFn: v => v > 80 ? 'normal' : 'warning',
-      stFn:     v => v > 80 ? '稳定' : '老化' },
-    { key: 'voltage',     colRe: /^voltage$/i,         icon: '⚡', bg: 'var(--blue-bg)',   fg: 'var(--blue)',   label: '电压', unit: 'V',
-      statusFn: () => 'stable', stFn: () => '均值' },
-    { key: 'temperature', colRe: /^(temperature|temp|cell_avg_temp)$/i, icon: '🌡️', bg: 'var(--orange-bg)', fg: 'var(--orange)', label: '温度', unit: '°C',
-      statusFn: v => v > 45 ? 'danger' : 'stable',
-      stFn:     v => v > 45 ? '过高' : '正常' },
-    { key: 'current',     colRe: /^current$/i,         icon: '🔌', bg: 'var(--purple-bg)', fg: 'var(--purple)', label: '电流', unit: 'A',
-      statusFn: () => 'info', stFn: () => '均值' },
-  ];
-
-  for (const def of _METRIC_DEFS) {
-    const stats = _colStats(tbl, def.colRe);
-    const meanVal = stats ? stats.mean : m[def.key];
-    if (meanVal === undefined) continue;
-    const v = typeof meanVal === 'number' ? Number(meanVal.toFixed(2)) : meanVal;
-    items.push({
-      icon: def.icon, iconBg: def.bg, iconColor: def.fg,
-      label: def.label, value: v, unit: def.unit,
-      status: def.statusFn(v), st: def.stFn(v),
-    });
-    if (stats && stats.count > 1) {
-      items.push({
-        icon: '📐', iconBg: def.bg, iconColor: def.fg,
-        label: `${def.label}范围`,
-        value: `${stats.min.toFixed(2)}~${stats.max.toFixed(2)}`,
-        unit: def.unit, status: 'stable', st: `${stats.count}条`,
-      });
-    }
+  const mc = cs && cs.metric_cards;
+  if (!mc || !Array.isArray(mc.tables) || !mc.tables.length) {
+    dbgStream('renderMetricsGrid: empty metric_cards', mc);
+    return '';
   }
-
-  if (!items.length) return '';
-  return `
-    <div class="metrics-grid">
-      ${items.slice(0, 8).map(i => `
-        <div class="metric-card">
-          <div class="metric-icon" style="background:${i.iconBg};color:${i.iconColor};">${i.icon}</div>
-          <div class="metric-label">${esc(i.label)}</div>
-          <div class="metric-value">${esc(String(i.value))}<span class="metric-unit">${esc(i.unit||'')}</span></div>
-          <span class="metric-status status-${i.status}">${esc(i.st||'')}</span>
-        </div>`).join('')}
-    </div>`;
+  const segs = [];
+  for (const tbl of mc.tables) {
+    const defs = METRIC_CARD_DEFS[tbl.table];
+    if (!defs) {
+      dbgStream('renderMetricsGrid: no defs for table', tbl.table);
+      continue;
+    }
+    const html = (tbl.items || []).map(item => {
+      const def = defs.find(d => d.field === item.field);
+      if (!def) return '';
+      return _renderMetricCardOne(item, def);
+    }).filter(Boolean).join('');
+    if (!html) {
+      dbgStream('renderMetricsGrid: table has items but rendered empty', {
+        table: tbl.table,
+        item_fields: (tbl.items || []).map(x => x.field),
+      });
+      continue;
+    }
+    segs.push(`
+      <div class="ai-card-section">
+        <div class="ai-card-section-title">
+          <span class="icon">📊</span><span>${esc(tbl.label || tbl.table)}</span>
+          <span style="margin-left:auto;font-weight:500;color:var(--text-muted);font-size:11.5px;">共 ${tbl.row_count || 0} 条记录</span>
+        </div>
+        <div class="metrics-grid">${html}</div>
+      </div>`);
+  }
+  return segs.join('');
 }
 
 function renderAlarmCard(cs) {
@@ -2273,22 +2537,15 @@ function renderAlarmCard(cs) {
       </div>
     </div>` : '';
 
-  // Two-column: 诊断要点 + 建议关注 (parsed from report markdown)
-  let twoColH = '';
+  // Single-column: 告警分析结论（parsed from report markdown）
+  let insightH = '';
   if (cs.report && cs.report.trim()) {
     const sec = parseSections(cs.report);
-    twoColH = `
+    insightH = `
       <div class="ai-card-section">
-        <div class="ai-card-section-title"><span class="icon">🩺</span><span>诊断要点 / 建议关注</span></div>
-        <div class="split-2">
-          <div class="bullet-card">
-            <div class="bullet-card-title">🔍 诊断要点</div>
-            <div class="md-body">${renderMd(sec.analysis || sec.body || '暂无要点')}</div>
-          </div>
-          <div class="bullet-card" style="border-left-color:var(--green);">
-            <div class="bullet-card-title">💡 建议关注</div>
-            <div class="md-body">${renderMd(sec.conclusion || sec.suggest || '暂无建议')}</div>
-          </div>
+        <div class="ai-card-section-title"><span class="icon">🩺</span><span>诊断分析</span></div>
+        <div class="bullet-card">
+          <div class="md-body">${renderMd(sec.analysis || sec.body || sec.conclusion || sec.suggest || cs.report || '暂无分析')}</div>
         </div>
       </div>`;
   }
@@ -2300,12 +2557,12 @@ function renderAlarmCard(cs) {
     const cols = ['start_time', 'bmu_code', 'cell_id', 'severity', 'average_severity', 'summary_cn'];
     tableH = `
       <div class="ai-card-section" style="padding-top:0;">
-        <div class="ai-card-section-title"><span class="icon">📋</span><span>告警明细 (Top ${Math.min(rows.length, 50)})</span></div>
+        <div class="ai-card-section-title"><span class="icon">📋</span><span>告警明细 (Top ${Math.min(rows.length, 500)})</span></div>
         <div class="alarm-table-wrap">
           <div class="alarm-table-scroll">
             <table>
               <thead><tr>${cols.map(c => `<th>${esc(prettyAlarmCol(c))}</th>`).join('')}</tr></thead>
-              <tbody>${rows.slice(0, 50).map(r => `<tr>${cols.map(c => {
+              <tbody>${rows.slice(0, 500).map(r => `<tr>${cols.map(c => {
                 if (c === 'severity' || c === 'average_severity') {
                   const v = Number(r[c]);
                   if (!Number.isFinite(v)) return '<td>—</td>';
@@ -2326,8 +2583,9 @@ function renderAlarmCard(cs) {
       <span>正在查询告警数据库...</span>
     </div></div>`;
   }
+  const ctxH = renderMetricContextStrip(cs.metric_cards && cs.metric_cards.context);
   let clarifyH = renderClarifyCandidates(cs);
-  return `<div class="ai-card-body">${bannerH}${metricsH}</div>${chipsH}${twoColH}${tableH}${clarifyH}`;
+  return `<div class="ai-card-body">${ctxH}${bannerH}${metricsH}</div>${chipsH}${insightH}${tableH}${clarifyH}`;
 }
 
 function prettyAlarmCol(c) {
@@ -2406,8 +2664,10 @@ function renderFaultDiagnosisCard(cs) {
         </div>
       </div>`;
   }
+  const ctxH = renderMetricContextStrip(cs.metric_cards && cs.metric_cards.context);
+  const mcGridH = renderMetricsGrid(cs);
   let clarifyH = renderClarifyCandidates(cs);
-  return `<div class="ai-card-body">${conclusionH}</div>${evidenceH}${pipelineH}${clarifyH}`;
+  return `<div class="ai-card-body">${ctxH}${mcGridH}${conclusionH}</div>${evidenceH}${pipelineH}${clarifyH}`;
 }
 
 function toggleSqlTable(id) {
@@ -2449,6 +2709,29 @@ function parseSections(md) {
     else if (/建议|关注|action/.test(t)) out.suggest = s.body;
   }
   return out;
+}
+
+function inferTaskType(cs) {
+  const explicit = String(cs.task_type || '').trim();
+  if (explicit && explicit !== 'direct') return explicit;
+  // metric_cards 已经按表分桶，可以更精确地判断 troubleshooting / alerting
+  const mc = cs && cs.metric_cards;
+  if (mc && Array.isArray(mc.tables) && mc.tables.length) {
+    const tnames = mc.tables.map(t => String(t.table || '').toLowerCase());
+    if (tnames.includes('alarm_event')) return 'alerting';
+    if (tnames.some(t => ['dcr_abnormal_cells', 'isc_score_result', 'capacity_inconsistent_cells', 'volt_temp_abnormal_result'].includes(t))) return 'troubleshooting';
+    if (tnames.some(t => ['bmu_data', 'cluster_data', 'box_data'].includes(t))) return 'station_device_td';
+  }
+  const hasAlarm = Boolean((cs.alarm_rows && cs.alarm_rows.length) || (cs.alarm_summary && cs.alarm_summary.total));
+  if (hasAlarm) return 'alerting';
+  const hasSql = Boolean(
+    (Array.isArray(cs.executed_sqls) && cs.executed_sqls.some(s => String(s || '').trim())) ||
+    (cs.sql_table && cs.sql_table.columns && cs.sql_table.columns.length && cs.sql_table.rows && cs.sql_table.rows.length)
+  );
+  if (hasSql) return 'station_device_td';
+  const hasEvidence = Boolean(cs.evidence_chunks && cs.evidence_chunks.length);
+  if (hasEvidence) return (cs.mode === 'deep') ? 'deep_research' : 'kb_retrieval';
+  return explicit || 'direct';
 }
 
 // ==========================================
@@ -2493,9 +2776,11 @@ async function sendMessage() {
 function startSSE(cardId) {
   if (eventSource) eventSource.close();
   eventSource = new EventSource('/api/stream');
+  dbgStream('startSSE', { cardId });
 
   eventSource.addEventListener('report', e => {
     const data = JSON.parse(e.data);
+    dbgStream('event:report', { len: (data.html || '').length });
     const cs = cardState.get(cardId) || {};
     cs.report = data.html || '';
     cardState.set(cardId, cs);
@@ -2503,6 +2788,7 @@ function startSSE(cardId) {
   });
   eventSource.addEventListener('timeline', e => {
     const data = JSON.parse(e.data);
+    dbgStream('event:timeline', { steps: (data.steps || []).length });
     const cs = cardState.get(cardId) || {};
     cs.steps = data.steps || [];
     cardState.set(cardId, cs);
@@ -2518,6 +2804,7 @@ function startSSE(cardId) {
   });
   eventSource.addEventListener('state', e => {
     const data = JSON.parse(e.data);
+    dbgStream('event:state keys', Object.keys(data || {}));
     const cs = cardState.get(cardId) || {};
     if (data.metrics) cs.metrics = data.metrics;
     if (data.chart_url) cs.chart_url = data.chart_url;
@@ -2530,15 +2817,25 @@ function startSSE(cardId) {
     if (data.alarm_summary) cs.alarm_summary = data.alarm_summary;
     if (data.sql_table) cs.sql_table = data.sql_table;
     if (data.executed_sqls) cs.executed_sqls = data.executed_sqls;
+    if (data.metric_cards) cs.metric_cards = data.metric_cards;
     if (data.mode) cs.mode = data.mode;
     if (data.clarify_candidates && data.clarify_candidates.length) cs.clarify_candidates = data.clarify_candidates;
+    cs.task_type = inferTaskType(cs);
+    dbgStream('event:state merged', {
+      task_type: cs.task_type,
+      sql_rows: (((cs.sql_table || {}).rows) || []).length,
+      sql_cols: (((cs.sql_table || {}).columns) || []).length,
+      metric_tables: ((((cs.metric_cards || {}).tables) || [])).map(t => ({ table: t.table, items: (t.items || []).length })),
+      report_len: (cs.report || '').length,
+    });
     cardState.set(cardId, cs);
     rerenderCard(cardId);
     if (cardId === activeCardId) {
-      applyTaskType(cs.task_type || 'direct');
+      applyTaskType(inferTaskType(cs));
     }
   });
   eventSource.addEventListener('complete', () => {
+    dbgStream('event:complete', { cardId });
     eventSource.close(); eventSource = null;
     isRunning = false;
     document.getElementById('sendBtn').disabled = false;
@@ -2547,6 +2844,7 @@ function startSSE(cardId) {
     finalizeAI(cardId);
   });
   eventSource.onerror = () => {
+    dbgStream('event:error', { cardId });
     if (eventSource) { eventSource.close(); eventSource = null; }
     isRunning = false;
     document.getElementById('sendBtn').disabled = false;
@@ -2596,6 +2894,16 @@ function copySqlText(sqlText) {
   const txt = String(sqlText || '').trim();
   if (!txt) return showToast('SQL 为空，无法复制');
   navigator.clipboard.writeText(txt).then(() => showToast('已复制 SQL')).catch(() => showToast('复制失败'));
+}
+
+function copySqlFromBtn(btn) {
+  const encoded = btn && btn.dataset ? btn.dataset.sql : '';
+  if (!encoded) return showToast('SQL 为空，无法复制');
+  try {
+    copySqlText(decodeURIComponent(encoded));
+  } catch (e) {
+    showToast('复制失败');
+  }
 }
 
 function getLatestConclusionText() {
@@ -2705,6 +3013,21 @@ function esc(t) {
   return d.innerHTML;
 }
 function escAttr(t) { return esc(t).replace(/'/g, '&#39;').replace(/"/g, '&quot;'); }
+function renderMathSafely(rootEl) {
+  if (!rootEl || typeof renderMathInElement === 'undefined') return;
+  try {
+    renderMathInElement(rootEl, {
+      delimiters: [
+        { left: '$$', right: '$$', display: true },
+        { left: '\\[', right: '\\]', display: true },
+        { left: '$', right: '$', display: false },
+        { left: '\\(', right: '\\)', display: false },
+      ],
+      throwOnError: false,
+      strict: 'ignore',
+    });
+  } catch (e) {}
+}
 function renderMd(t) {
   if (!t) return '';
   try {
@@ -2769,6 +3092,7 @@ async function loadHistory() {
             </div>`);
         }
       }
+      renderMathSafely(document.getElementById('chatArea'));
       scrollBot();
     }
   } catch (e) {}
