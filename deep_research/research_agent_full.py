@@ -139,7 +139,12 @@ class AgentInputState(TypedDict, total=False):
     user_request: str
     pre_brief_cases: str
     # 允许输入包含历史
-    history: List[str] 
+    history: List[str]
+    # Web server：按轮日志（须出现在 input_schema 以免被丢弃）
+    run_id: str
+    db_chain_log_path: str
+    db_plan_sanitizer_log_path: str
+    db_sanitizer_log_enabled: bool
 
 
 def _messages_to_gemini_io(messages) -> Tuple[str, str]:

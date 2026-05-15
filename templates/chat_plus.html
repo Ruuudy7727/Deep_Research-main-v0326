@@ -1466,6 +1466,8 @@ let cardState = new Map();
 // global last task_type drives right rail
 let activeTaskType = 'direct';
 let activeCardId = null;
+/** 最近一次完成的助手回答在服务端 chat_history 中的索引，供顶部「导出」无 cardId 时使用 */
+let lastReportHistoryIndex = null;
 const LAYOUT_PREF_KEY = 'cobot_layout_pref_v1';
 // Frontend debug switch:
 // 1) URL: ?debug_stream=1
@@ -2116,7 +2118,7 @@ function rerenderCard(cardId) {
   const footerH = `
     <div class="ai-card-ft">
       <button class="card-act-btn" onclick="copyRpt('${cardId}')">📋 复制结论</button>
-      <button class="card-act-btn" onclick="downloadReport()">📥 导出 HTML 报告</button>
+      <button class="card-act-btn" onclick="downloadReport('${cardId}')">📥 导出 HTML 报告</button>
     </div>`;
   card.innerHTML = headerH + bodyH + footerH;
   renderMathSafely(card);
@@ -2834,14 +2836,21 @@ function startSSE(cardId) {
       applyTaskType(inferTaskType(cs));
     }
   });
-  eventSource.addEventListener('complete', () => {
-    dbgStream('event:complete', { cardId });
+  eventSource.addEventListener('complete', (e) => {
+    let historyIndex = null;
+    try {
+      const d = JSON.parse(e.data || '{}');
+      if (typeof d.history_index === 'number' && Number.isFinite(d.history_index)) {
+        historyIndex = d.history_index;
+      }
+    } catch (_) { /* ignore */ }
+    dbgStream('event:complete', { cardId, historyIndex });
     eventSource.close(); eventSource = null;
     isRunning = false;
     document.getElementById('sendBtn').disabled = false;
     document.getElementById('statusText').textContent = 'Online';
     document.getElementById('statusDot').style.background = 'var(--green)';
-    finalizeAI(cardId);
+    finalizeAI(cardId, historyIndex);
   });
   eventSource.onerror = () => {
     dbgStream('event:error', { cardId });
@@ -2853,8 +2862,13 @@ function startSSE(cardId) {
   };
 }
 
-function finalizeAI(cardId) {
+function finalizeAI(cardId, historyIndex) {
   const cs = cardState.get(cardId) || {};
+  if (typeof historyIndex === 'number' && Number.isFinite(historyIndex)) {
+    cs.history_index = historyIndex;
+    lastReportHistoryIndex = historyIndex;
+    cardState.set(cardId, cs);
+  }
   if (cs.report && cs.report.trim()) {
     chatMessages.push({ role: 'assistant', content: cs.report, ts: Date.now()/1000, task_type: cs.task_type });
   }
@@ -2863,7 +2877,19 @@ function finalizeAI(cardId) {
 // ==========================================
 // Actions
 // ==========================================
-function downloadReport() { window.open('/api/download', '_blank'); }
+function downloadReport(cardId) {
+  let idx = null;
+  if (cardId) {
+    const cs = cardState.get(cardId);
+    if (cs && typeof cs.history_index === 'number' && Number.isFinite(cs.history_index)) {
+      idx = cs.history_index;
+    }
+  } else if (typeof lastReportHistoryIndex === 'number' && Number.isFinite(lastReportHistoryIndex)) {
+    idx = lastReportHistoryIndex;
+  }
+  const q = idx != null ? `?history_index=${encodeURIComponent(String(idx))}` : '';
+  window.open('/api/download' + q, '_blank');
+}
 async function resetChat() {
   if (isRunning) { showToast('请等待当前分析完成后再重置。'); return; }
   if (!confirm('确定要重置对话吗？所有上下文将清空。')) return;

@@ -25,6 +25,7 @@ import mimetypes
 import re
 import tempfile
 import html as html_module
+from urllib.parse import urlparse
 
 try:
     from markdown_it import MarkdownIt
@@ -33,8 +34,10 @@ except ImportError:
 from typing import List, Dict, Any, Tuple, Optional
 from pathlib import Path
 
+from deep_research.run_logging import apply_runtime_logging_defaults, maybe_create_web_run_session
+
 from fastapi import FastAPI, Request, File, UploadFile, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse, Response
+from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
@@ -108,6 +111,13 @@ SHARED_STATE: Dict[str, Any] = {
     # {"task_type": "...", "context": {"device":{...},"time_range":{...}},
     #  "tables": [{"table":"bmu_data","label":"...","row_count":N,"items":[...]}]}
     "metric_cards": {},
+    # 本轮问答墙钟完成时刻与总耗时（background_graph_runner finally 写入）
+    "last_answer_completed_at": None,
+    "last_answer_elapsed_seconds": None,
+    # 本轮 Cobot 对话的文件日志（log/runs/<run_id>/）；见 deep_research/run_logging.py
+    "run_session": None,
+    "current_run_id": None,
+    "current_run_dir": None,
 }
 
 MEMORY = MemorySaver()
@@ -247,6 +257,66 @@ def _chart_image_data_uri(chart_path: Optional[str]) -> Optional[str]:
         return None
 
 
+def _local_web_src_to_data_uri(src: str) -> Optional[str]:
+    """将报告 HTML/Markdown 中的 /kb_images/...、/figure/...（或同源绝对 URL）转为 data URI，便于离线打开 HTML。"""
+    if not src or str(src).strip().lower().startswith("data:"):
+        return None
+    raw = str(src).strip().strip('"').strip("'")
+    path_part = raw.split("?", 1)[0].split("#", 1)[0]
+    if path_part.startswith(("http://", "https://")):
+        try:
+            path_part = urlparse(path_part).path or ""
+        except Exception:
+            return None
+    if not path_part.startswith("/"):
+        return None
+
+    local_path: Optional[Path] = None
+    if path_part.startswith("/kb_images/"):
+        rel = path_part[len("/kb_images/") :].lstrip("/")
+        if not rel or ".." in rel.replace("\\", "/"):
+            return None
+        local_path = KB_IMAGES_DIR / rel
+    elif path_part.startswith("/figure/"):
+        fn = os.path.basename(path_part)
+        if not fn or ".." in fn:
+            return None
+        local_path = PROJECT_ROOT / "figure" / fn
+
+    if not local_path or not local_path.is_file():
+        return None
+    try:
+        mime_type, _ = mimetypes.guess_type(str(local_path))
+        if not mime_type:
+            mime_type = "image/jpeg"
+        with open(local_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("ascii")
+        return f"data:{mime_type};base64,{b64}"
+    except OSError as e:
+        print(f"[Report HTML] inline image failed {local_path}: {e}", flush=True)
+        return None
+
+
+def _embed_local_images_in_html(html: str) -> str:
+    """把 <img src=\"/kb_images/...\"> 等替换为 data URI（离线 file:// 打开时仍可显示）。"""
+    if not html:
+        return html
+
+    def repl(m):
+        prefix, quote, src, endq = m.group(1), m.group(2), m.group(3), m.group(4)
+        data_uri = _local_web_src_to_data_uri(src)
+        if not data_uri:
+            return m.group(0)
+        return f"{prefix}{quote}{data_uri}{endq}"
+
+    return re.sub(
+        r'(<img\b[^>]*?\bsrc\s*=\s*)(["\'])([^"\']+)(\2)',
+        repl,
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+
 _LEADING_MD_IMG_RE = re.compile(r"^\s*!\[[^\]]*\]\(([^)]+)\)\s*\n*", re.MULTILINE)
 
 
@@ -291,9 +361,15 @@ h1 { font-size: 1.5rem; margin-bottom: 0.25rem; color: #0f172a; }
 """
 
 
-def _build_report_html(report_md: str, chart_path: Optional[str], timestamp: str) -> str:
+def _build_report_html(
+    report_md: str,
+    chart_path: Optional[str],
+    timestamp: str,
+    elapsed_seconds: Optional[float] = None,
+) -> str:
     """Single-file HTML: embedded chart (base64) + markdown body."""
     body_md = _strip_duplicate_leading_chart_md(report_md or "", chart_path)
+    body_md = _strip_trailing_answer_timing_footer(body_md)
     chart_uri = _chart_image_data_uri(chart_path)
     chart_block = ""
     if chart_uri:
@@ -301,6 +377,10 @@ def _build_report_html(report_md: str, chart_path: Optional[str], timestamp: str
             f'<div class="report-chart"><img src="{chart_uri}" alt="Chart" /></div>'
         )
     inner = _markdown_to_html_fragment(body_md)
+    inner = _embed_local_images_in_html(inner)
+    meta_line = f"生成时间：{html_module.escape(timestamp)}"
+    if elapsed_seconds is not None:
+        meta_line += f" ｜ 总耗时：{elapsed_seconds:.2f} 秒"
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -311,7 +391,7 @@ def _build_report_html(report_md: str, chart_path: Optional[str], timestamp: str
 </head>
 <body>
 <h1>诊断报告</h1>
-<p class="meta">生成时间：{html_module.escape(timestamp)}</p>
+<p class="meta">{meta_line}</p>
 {chart_block}
 <div class="report-body">{inner}</div>
 </body>
@@ -1692,20 +1772,67 @@ def _extract_structured_data(output: dict):
             )
 
 
+_ANSWER_TIMING_SENTINEL = "本轮总耗时"
+# 与 _append_answer_timing_to_markdown 追加的脚注格式一致，供导出 HTML 时去重正文
+_TIMING_FOOTER_TAIL_RE = re.compile(
+    r"\n\n---\n\n生成时间：[^\n]+｜\s*本轮总耗时：[\d.]+\s*秒\s*$",
+    re.MULTILINE,
+)
+
+
+def _strip_trailing_answer_timing_footer(md: str) -> str:
+    if not md:
+        return md
+    return _TIMING_FOOTER_TAIL_RE.sub("", md).rstrip()
+
+
+def _append_answer_timing_to_markdown(completed_at: str, elapsed_s: float) -> None:
+    """在最终 Markdown 报告末尾追加「生成时间 + 总耗时」，并写入 SSE 日志区。"""
+    footer = f"\n\n---\n\n生成时间：{completed_at} ｜ 本轮总耗时：{elapsed_s:.2f} 秒\n"
+    for key in ("final_report", "stream_buffer"):
+        cur = SHARED_STATE.get(key) or ""
+        if not isinstance(cur, str):
+            cur = str(cur)
+        if not cur.strip():
+            continue
+        if _ANSWER_TIMING_SENTINEL in cur:
+            continue
+        SHARED_STATE[key] = cur.rstrip() + footer
+
+
 async def background_graph_runner(
     question: str,
     deep_mode: bool = False,
     prior_turns: Optional[List[str]] = None,
 ):
     global CURRENT_THREAD_ID
+    run_sess = SHARED_STATE.get("run_session")
     try:
         SHARED_STATE["is_running"] = True
+        SHARED_STATE["_answer_run_start_perf"] = time.perf_counter()
         mode_label = "Deep Research" if deep_mode else "Fast"
         SHARED_STATE["logs"].append(f"[Start - {mode_label}] {datetime.datetime.now().strftime('%H:%M:%S')}\n")
 
         if prior_turns:
             SHARED_STATE["logs"].append(
                 f"[Context] injected {len(prior_turns)} prior turns (thread={CURRENT_THREAD_ID})\n"
+            )
+
+        if run_sess:
+            apply_runtime_logging_defaults(run_sess.log_profile)
+            q_preview = str(question or "")[:800]
+            run_sess.main_line(
+                f"chat_run_start mode={mode_label} thread={CURRENT_THREAD_ID} "
+                f"prior_turns={len(prior_turns or [])}"
+            )
+            run_sess.event(
+                "INFO",
+                "server",
+                "chat_run_start",
+                deep_mode=deep_mode,
+                prior_turn_count=len(prior_turns or []),
+                question_preview=q_preview,
+                thread_id=CURRENT_THREAD_ID,
             )
 
         dr_utils.set_models(gemini_chat_runnable)
@@ -1731,6 +1858,12 @@ async def background_graph_runner(
                 "notes": [],
                 "supervisor_messages": [],
             }
+
+        if run_sess:
+            inputs["run_id"] = run_sess.run_id
+            inputs["db_chain_log_path"] = str(run_sess.db_chain_log_path)
+            inputs["db_plan_sanitizer_log_path"] = str(run_sess.db_plan_sanitizer_log_path)
+            inputs["db_sanitizer_log_enabled"] = run_sess.log_profile == "full"
 
         config = {"configurable": {"thread_id": CURRENT_THREAD_ID}}
 
@@ -1762,6 +1895,19 @@ async def background_graph_runner(
 
         async for event in graph.astream_events(inputs, config=config, version="v1"):
             kind, name, data = event.get("event"), event.get("name"), event.get("data", {})
+            graph_ev_run_id = event.get("run_id")
+
+            if run_sess:
+                if run_sess.log_profile == "full":
+                    run_sess.log_langgraph_full(kind, name, data, graph_ev_run_id)
+                elif kind in ("on_chain_error", "on_llm_error", "on_tool_error"):
+                    run_sess.event(
+                        "ERROR",
+                        "langgraph",
+                        str(kind or "graph_error"),
+                        node=name,
+                        detail=run_sess.preview_data(data),
+                    )
 
             if kind == "on_chain_start" and name in tracked_nodes:
                 node_start_times[name] = time.perf_counter()
@@ -1773,6 +1919,8 @@ async def background_graph_runner(
                 else:
                     existing["status"] = "running"
                 SHARED_STATE["logs"].append(f"\nNode: {format_node_name(name)}")
+                if run_sess:
+                    run_sess.event("INFO", "graph", "node_chain_start", node=name)
 
             elif kind == "on_chain_end":
                 if name in node_start_times:
@@ -1784,6 +1932,14 @@ async def background_graph_runner(
                     SHARED_STATE["logs"].append(
                         f"\n✅ Node Done: {format_node_name(name)} ({duration:.2f}s)"
                     )
+                    if run_sess:
+                        run_sess.event(
+                            "INFO",
+                            "graph",
+                            "node_chain_end",
+                            node=name,
+                            duration_s=round(duration, 4),
+                        )
 
                 if isinstance(data.get("output"), dict):
                     output = data["output"]
@@ -1947,9 +2103,56 @@ async def background_graph_runner(
 
     except Exception as e:
         import traceback
+
         SHARED_STATE["logs"].append(f"\nError: {str(e)}\n{traceback.format_exc()}")
         print(f"Error: {e}", flush=True)
+        if run_sess:
+            run_sess.event(
+                "ERROR",
+                "server",
+                "chat_run_exception",
+                error=str(e),
+                traceback=traceback.format_exc(),
+            )
+            run_sess.main_line(f"EXCEPTION: {type(e).__name__}: {e}")
     finally:
+        start_perf = SHARED_STATE.pop("_answer_run_start_perf", None)
+        if start_perf is not None:
+            elapsed = time.perf_counter() - start_perf
+            completed_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            SHARED_STATE["last_answer_elapsed_seconds"] = elapsed
+            SHARED_STATE["last_answer_completed_at"] = completed_at
+            timing_msg = (
+                f"生成时间：{completed_at} ｜ 本轮总耗时：{elapsed:.2f}s"
+            )
+            print(f"[Answer timing] {timing_msg}", flush=True)
+            SHARED_STATE["logs"].append(f"\n⏱ {timing_msg}\n")
+            _append_answer_timing_to_markdown(completed_at, elapsed)
+            if run_sess:
+                run_sess.main_line(timing_msg)
+                run_sess.event(
+                    "INFO",
+                    "server",
+                    "chat_run_end",
+                    elapsed_s=round(elapsed, 4),
+                    completed_at=completed_at,
+                    task_type=SHARED_STATE.get("task_type"),
+                    retrieved_images=len(SHARED_STATE.get("retrieved_images") or []),
+                    evidence_chunks=len(SHARED_STATE.get("evidence_chunks") or []),
+                    executed_sqls=len(SHARED_STATE.get("executed_sqls") or []),
+                    chart_url=str(SHARED_STATE.get("chart_url") or "")[:500],
+                    stream_chars=len(str(SHARED_STATE.get("stream_buffer") or "")),
+                    final_report_chars=len(str(SHARED_STATE.get("final_report") or "")),
+                )
+        elif run_sess:
+            run_sess.event(
+                "WARN",
+                "server",
+                "chat_run_end",
+                elapsed_s=None,
+                note="missing perf counter start",
+                task_type=SHARED_STATE.get("task_type"),
+            )
         SHARED_STATE["is_running"] = False
 
 
@@ -2068,13 +2271,35 @@ async def api_chat(req: ChatRequest):
     SHARED_STATE["clarify_candidates"] = []
     SHARED_STATE["metric_cards"] = {}
     SHARED_STATE["current_mode"] = req.mode
+    SHARED_STATE["last_answer_elapsed_seconds"] = None
+    SHARED_STATE["last_answer_completed_at"] = None
+
+    SHARED_STATE["run_session"] = None
+    SHARED_STATE["current_run_id"] = None
+    SHARED_STATE["current_run_dir"] = None
+
+    _sess = maybe_create_web_run_session(
+        PROJECT_ROOT,
+        thread_id=CURRENT_THREAD_ID,
+        mode=req.mode,
+    )
+    SHARED_STATE["run_session"] = _sess
+    if _sess:
+        SHARED_STATE["current_run_id"] = _sess.run_id
+        SHARED_STATE["current_run_dir"] = str(_sess.run_dir)
+        print(f"[Run log] {_sess.run_dir}", flush=True)
 
     prior_turns = _build_prior_turns(SHARED_STATE["chat_history"], max_pairs=5)
     deep_mode = req.mode == "deep"
 
     asyncio.create_task(background_graph_runner(req.message, deep_mode=deep_mode, prior_turns=prior_turns))
 
-    return {"status": "started", "mode": req.mode}
+    return {
+        "status": "started",
+        "mode": req.mode,
+        "run_id": SHARED_STATE.get("current_run_id"),
+        "run_dir": SHARED_STATE.get("current_run_dir"),
+    }
 
 
 @app.get("/api/stream")
@@ -2190,15 +2415,22 @@ async def api_stream():
 
                 if report and not response_saved:
                     response_saved = True
-                    SHARED_STATE["chat_history"].append(
+                    hist = SHARED_STATE["chat_history"]
+                    hist.append(
                         {
                             "role": "assistant",
                             "content": report,
                             "kb_images": list(SHARED_STATE.get("retrieved_images") or []),
                             "ts": time.time(),
+                            "chart_url": SHARED_STATE.get("chart_url"),
+                            "answer_elapsed_seconds": SHARED_STATE.get("last_answer_elapsed_seconds"),
+                            "answer_completed_at": SHARED_STATE.get("last_answer_completed_at"),
                         }
                     )
-                yield f"event: complete\ndata: {json.dumps({'status': 'done'})}\n\n"
+                    done_payload: Dict[str, Any] = {"status": "done", "history_index": len(hist) - 1}
+                else:
+                    done_payload = {"status": "done"}
+                yield f"event: complete\ndata: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
                 break
 
             tick += 1
@@ -2250,18 +2482,85 @@ async def api_examples():
 
 
 @app.get("/api/download")
-async def api_download():
-    report = SHARED_STATE.get("final_report", "")
+async def api_download(history_index: Optional[int] = None):
+    hist = [m for m in (SHARED_STATE.get("chat_history") or []) if isinstance(m, dict)]
+    entry: Optional[Dict[str, Any]] = None
+
+    if history_index is not None:
+        if history_index < 0 or history_index >= len(hist):
+            return JSONResponse(
+                {"error": "history_index 超出范围"},
+                status_code=400,
+            )
+        cand = hist[history_index]
+        if cand.get("role") != "assistant":
+            return JSONResponse(
+                {"error": "该索引不是助手回答，无法导出"},
+                status_code=400,
+            )
+        entry = cand
+    else:
+        for m in reversed(hist):
+            if m.get("role") == "assistant" and (m.get("content") or "").strip():
+                entry = m
+                break
+
+    if entry is not None:
+        report = (entry.get("content") or "").strip()
+        chart_path = entry.get("chart_url")
+    else:
+        report = (SHARED_STATE.get("final_report") or "").strip()
+        chart_path = SHARED_STATE.get("chart_url")
+
     if not report:
-        return {"error": "暂无报告可下载"}
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ts_file = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"Report_{ts_file}.html"
+        return JSONResponse({"error": "暂无报告可下载"}, status_code=404)
+
+    resolved_idx: Optional[int] = history_index
+    if entry is not None and resolved_idx is None:
+        for i, m in enumerate(hist):
+            if m is entry:
+                resolved_idx = i
+                break
+
+    ts_val = entry.get("ts") if entry else None
+    try:
+        ts_float = float(ts_val) if ts_val is not None else time.time()
+    except (TypeError, ValueError):
+        ts_float = time.time()
+    if entry is not None:
+        ca = str(entry.get("answer_completed_at") or "").strip()
+        if ca:
+            timestamp = ca
+        else:
+            timestamp = datetime.datetime.fromtimestamp(ts_float).strftime("%Y-%m-%d %H:%M:%S")
+    elif (SHARED_STATE.get("last_answer_completed_at") or "").strip():
+        timestamp = str(SHARED_STATE["last_answer_completed_at"]).strip()
+    else:
+        timestamp = datetime.datetime.fromtimestamp(ts_float).strftime("%Y-%m-%d %H:%M:%S")
+    ts_file = datetime.datetime.fromtimestamp(ts_float).strftime("%Y%m%d_%H%M%S")
+    elapsed_export: Optional[float] = None
+    if entry is not None:
+        try:
+            raw_el = entry.get("answer_elapsed_seconds")
+            if raw_el is not None:
+                elapsed_export = float(raw_el)
+        except (TypeError, ValueError):
+            elapsed_export = None
+    else:
+        try:
+            raw_el = SHARED_STATE.get("last_answer_elapsed_seconds")
+            if raw_el is not None:
+                elapsed_export = float(raw_el)
+        except (TypeError, ValueError):
+            elapsed_export = None
+    if resolved_idx is not None:
+        filename = f"Report_{ts_file}_h{resolved_idx}.html"
+    else:
+        filename = f"Report_{ts_file}.html"
     reports_dir = PROJECT_ROOT / "reports"
     reports_dir.mkdir(exist_ok=True)
     filepath = reports_dir / filename
-    chart_path = SHARED_STATE.get("chart_url")
-    content = _build_report_html(report, chart_path, timestamp)
+    content = _build_report_html(report, chart_path, timestamp, elapsed_seconds=elapsed_export)
     filepath.write_text(content, encoding="utf-8")
     return FileResponse(str(filepath), filename=filename, media_type="text/html")
 

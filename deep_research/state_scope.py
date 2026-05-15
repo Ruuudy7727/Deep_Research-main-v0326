@@ -106,7 +106,13 @@ class AgentState(TypedDict, total=False):
     db_executed_sqls: Annotated[List[str], overwrite]
     db_evidence_bundle: Annotated[Dict[str, Any], overwrite]
     db_raw_results: Annotated[List[Dict[str, Any]], overwrite]
-    
+
+    # Web / CLI：本轮 run_id 与 DB 链路日志路径（server_plus / thinkdepth_test 注入）
+    run_id: Annotated[str, overwrite]
+    db_chain_log_path: Annotated[str, overwrite]
+    db_plan_sanitizer_log_path: Annotated[str, overwrite]
+    db_sanitizer_log_enabled: Annotated[bool, overwrite]
+
     # 标记位
     is_complex_task: Annotated[bool, overwrite]
     is_chart_needed: Annotated[bool, overwrite]
