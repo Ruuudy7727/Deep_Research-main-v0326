@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>科宝 Cobot</title>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
@@ -12,33 +14,33 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --primary: #4F46E5;
-  --primary-light: #6366F1;
-  --primary-dark: #4338CA;
-  --primary-soft: #EEF2FF;
-  --bg: #F4F6FB;
-  --bg-soft: #F9FAFC;
+  --primary: #1894D2;
+  --primary-light: #4BB7EA;
+  --primary-dark: #0F6EA0;
+  --primary-soft: #E6F7FF;
+  --bg: #F5FBFF;
+  --bg-soft: #ECF6FF;
   --card: #FFFFFF;
-  --text-primary: #1F2937;
-  --text-secondary: #4B5563;
-  --text-muted: #94A3B8;
-  --border: #E5E7EB;
-  --border-light: #F1F5F9;
+  --text-primary: #172B3A;
+  --text-secondary: #475A6B;
+  --text-muted: #7B8A99;
+  --border: #D8E6F1;
+  --border-light: #E8F2F8;
   --green: #10B981;
   --green-bg: #ECFDF5;
   --orange: #F59E0B;
   --orange-bg: #FFFBEB;
   --red: #EF4444;
   --red-bg: #FEF2F2;
-  --blue: #3B82F6;
-  --blue-bg: #EFF6FF;
+  --blue: #1894D2;
+  --blue-bg: #E6F7FF;
   --purple: #8B5CF6;
   --purple-bg: #F5F3FF;
   --teal: #14B8A6;
   --teal-bg: #ECFDF5;
-  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.05);
-  --shadow-md: 0 4px 14px rgba(15, 23, 42, 0.08);
-  --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.12);
+  --shadow-sm: 0 1px 3px rgba(23, 69, 102, 0.08);
+  --shadow-md: 0 8px 20px rgba(23, 69, 102, 0.08);
+  --shadow-lg: 0 16px 40px rgba(23, 69, 102, 0.12);
   --radius: 14px;
   --radius-sm: 10px;
   --radius-xs: 8px;
@@ -83,30 +85,40 @@ body[data-sidebar="collapsed"][data-rail="hidden"] {
 /* ========== Header ========== */
 .app-header {
   grid-area: header;
-  background: var(--card);
-  border-bottom: 1px solid var(--border);
+  background: var(--primary);
+  border-bottom: 1px solid rgba(255,255,255,0.18);
   padding: 0 28px;
   display: flex; align-items: center; justify-content: space-between;
   z-index: 50;
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 10px 30px rgba(24, 148, 210, 0.12);
 }
 .brand { display: flex; align-items: center; gap: 14px; }
 .brand-logo {
   width: 52px; height: 40px;
-  border-radius: 8px;
+  border-radius: 12px;
   display: flex; align-items: center; justify-content: center;
   overflow: hidden;
-  background: #fff;
-  border: 1px solid var(--border-light);
+  background: rgba(255,255,255,0.16);
+  border: 1px solid rgba(255,255,255,0.22);
 }
 .brand-logo img {
   width: 100%; height: 100%;
   object-fit: contain;
 }
-.brand-text h1 { font-size: 17px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.2px; }
-.brand-text p { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.brand-text h1 { font-size: 17px; font-weight: 700; color: white; letter-spacing: 0.2px; }
+.brand-text p { font-size: 12px; color: rgba(255,255,255,0.85); margin-top: 2px; }
 
-.header-right { display: flex; align-items: center; gap: 14px; font-size: 13px; }
+.header-right { display: flex; align-items: center; gap: 14px; font-size: 13px; color: white; }
+
+.status-pill {
+  background: rgba(255,255,255,0.18); color: white;
+}
+.status-pill.memory {
+  background: rgba(255,255,255,0.18); color: white;
+}
+.workspace-select {
+  color: white;
+}
 .status-pill {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 6px 14px; border-radius: 999px;
@@ -1344,6 +1356,7 @@ body.lb-locked { overflow: hidden; }
       <div class="toolbar-spacer"></div>
       <button class="toolbar-action" onclick="copyLatestConclusion()">📋 复制结论</button>
       <button class="toolbar-action" onclick="downloadReport()">📥 导出 HTML 报告</button>
+      <button class="toolbar-action" onclick="downloadReportPdf()">📥 导出 PDF 报告</button>
       <button class="toolbar-action danger" onclick="resetChat()">🗑️ 重置对话</button>
     </div>
     <div class="composer-row">
@@ -2119,6 +2132,7 @@ function rerenderCard(cardId) {
     <div class="ai-card-ft">
       <button class="card-act-btn" onclick="copyRpt('${cardId}')">📋 复制结论</button>
       <button class="card-act-btn" onclick="downloadReport('${cardId}')">📥 导出 HTML 报告</button>
+      <button class="card-act-btn" onclick="downloadReportPdf('${cardId}')">📥 导出 PDF 报告</button>
     </div>`;
   card.innerHTML = headerH + bodyH + footerH;
   renderMathSafely(card);
@@ -2889,6 +2903,79 @@ function downloadReport(cardId) {
   }
   const q = idx != null ? `?history_index=${encodeURIComponent(String(idx))}` : '';
   window.open('/api/download' + q, '_blank');
+}
+
+async function downloadReportPdf(cardId) {
+  let entry = cardId ? cardState.get(cardId) : null;
+  if (!entry || !entry.report) {
+    if (typeof lastReportHistoryIndex === 'number' && Number.isFinite(lastReportHistoryIndex)) {
+      for (const [, state] of cardState.entries()) {
+        if (state && state.history_index === lastReportHistoryIndex) {
+          entry = state;
+          break;
+        }
+      }
+    }
+  }
+  const reportText = entry && typeof entry.report === 'string' ? entry.report.trim() : '';
+  const chartUrl = entry && entry.chart_url ? entry.chart_url : null;
+  if (!reportText) {
+    return showToast('暂无可下载的 PDF 报告');
+  }
+
+  const pdfTitle = `Report_${new Date().toISOString().replace(/[-:.]/g, '').slice(0,15)}`;
+  const wrapper = document.createElement('div');
+  wrapper.style.position = 'fixed';
+  wrapper.style.left = '-9999px';
+  wrapper.style.top = '0';
+  wrapper.style.width = '1080px';
+  wrapper.style.padding = '24px';
+  wrapper.style.background = '#ffffff';
+  wrapper.style.color = '#172B3A';
+  wrapper.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans SC', 'PingFang SC', sans-serif";
+  wrapper.style.lineHeight = '1.75';
+  wrapper.innerHTML = `
+    <div style="max-width: 1080px; margin: 0 auto;">
+      <div style="margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid #E8F2F8;">
+        <h1 style="font-size: 28px; margin: 0 0 8px; color: #0F6EA0;">分析报告</h1>
+        <div style="font-size: 13px; color: #5B6E7F;">生成时间：${new Date().toLocaleString()}</div>
+      </div>
+      ${chartUrl ? `<div style="margin: 18px 0; text-align: center;"><img src="${chartUrl}" style="max-width: 100%; height: auto; border-radius: 10px; border: 1px solid #E8F2F8;" /></div>` : ''}
+      <div class="md-body">${renderMd(reportText)}</div>
+    </div>
+  `;
+  document.body.appendChild(wrapper);
+
+  try {
+    const canvas = await html2canvas(wrapper, {
+      scale: 2,
+      useCORS: true,
+      allowTaint: true,
+      backgroundColor: '#ffffff',
+    });
+    const imgData = canvas.toDataURL('image/png');
+    const pdf = new jspdf.jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const imgWidth = pageWidth;
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+    let position = 0;
+    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+    let heightLeft = imgHeight - pageHeight;
+    while (heightLeft > 0) {
+      position = heightLeft - imgHeight;
+      pdf.addPage();
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+    }
+    pdf.save(`${pdfTitle}.pdf`);
+    showToast('PDF 报告已开始下载');
+  } catch (error) {
+    console.error(error);
+    showToast('PDF 导出失败，请稍后重试');
+  } finally {
+    document.body.removeChild(wrapper);
+  }
 }
 async function resetChat() {
   if (isRunning) { showToast('请等待当前分析完成后再重置。'); return; }

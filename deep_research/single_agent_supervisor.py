@@ -553,7 +553,11 @@ async def execute_tools_node(state: AgentState):
             if not final_obs: 
                 final_obs = "未能在知识库中检索到相关信息。"
 
-            # 4. 更新 Context
+            # 4. 更新 Context，限制检索结果长度为 1000 字符以加快响应
+            max_retrieval_chars = 1000
+            if len(final_obs) > max_retrieval_chars:
+                final_obs = final_obs[:max_retrieval_chars] + "...(已截断)"
+            
             log_msg = f"Retrieval tool executed. Query: {query_term}"
             updates["pre_brief_cases"] = current_context + f"\n\n【Local Knowledge Base Result】:\n{final_obs}"
             updates["supervisor_messages"] = [log_msg]
@@ -604,19 +608,22 @@ async def solve_simple_task(state: AgentState, writer=None) -> dict:
     if not retrieved_info:
         print("Warning: No retrieved info found in state (Pure Chat Mode).", flush=True)
 
-    # 读取最近对话历史
-    history_str = _get_recent_history_str(state, k=5, max_chars=1500)
-    history_block = ""
-    if history_str:
-        history_block = (
-            '\n\n最近对话历史（用于理解"以上/上面/之前"等指代）:\n' + history_str + "\n"
-        )
-
-    print("--- [Simple Path] Synthesizing Answer... ---", flush=True)
-
+    # 先确定 route 和 task_type
     route = str(state.get("supervisor_route") or "DIRECT").upper()
     task_type = str(state.get("task_type") or "").strip().lower()
     use_direct_demo_few_shots = route == "DIRECT" or task_type == "direct"
+
+    # 读取最近对话历史（仅 DIRECT 路径需要，RETRIEVE 路径跳过以加快响应）
+    history_str = ""
+    history_block = ""
+    if route == "DIRECT":
+        history_str = _get_recent_history_str(state, k=5, max_chars=800)
+        if history_str:
+            history_block = (
+                '\n\n最近对话历史（用于理解"以上/上面/之前"等指代）:\n' + history_str + "\n"
+            )
+
+    print("--- [Simple Path] Synthesizing Answer... ---", flush=True)
 
     # 定义系统指令
     system_instruction = (
@@ -670,11 +677,20 @@ async def solve_simple_task(state: AgentState, writer=None) -> dict:
         f"{closing}"
     )
 
-    LOCAL_MAX_TOKENS = 4096
+    # 根据路由选择合适的 max_tokens 和调用方式
+    # RETRIEVE: 使用非流式 (sync) 以减少开销，max_tokens=2048
+    # 其他路径: 保持流式，但也降低到 2048
+    if route == "RETRIEVE" or task_type == "kb_retrieval":
+        LOCAL_MAX_TOKENS = 2048
+        use_streaming = False
+    else:
+        LOCAL_MAX_TOKENS = 2048
+        use_streaming = True
+
     final_answer = ""
 
     # =========================================================================
-    # [流式处理] Wrapper 函数
+    # [流式处理] Wrapper 函数 (RPO)
     # =========================================================================
     def _sync_stream_consumption(u_text, sys_inst, max_tok, stream_writer):
         print("\n⚡ [RPO Stream Start] ...", flush=True)
@@ -714,18 +730,45 @@ async def solve_simple_task(state: AgentState, writer=None) -> dict:
             return final_txt if 'final_txt' in locals() else str(inner_e), {}
 
     # =========================================================================
+    # [非流式处理] Wrapper 函数 (Sync Direct)
+    # =========================================================================
+    def _sync_direct_call(u_text, sys_inst, max_tok):
+        print("\n⚡ [Sync Call Start] ...", flush=True)
+        try:
+            text, usage = gemini_chat_once(
+                user_text=u_text,
+                system_instruction=sys_inst,
+                temperature=0.3,
+                max_tokens=max_tok
+            )
+            print(text)
+            print("\n\n✅ [Sync Call End]\n", flush=True)
+            return text, usage
+        except Exception as inner_e:
+            print(f"\n❌ [Sync Call Error]: {inner_e}", flush=True)
+            return str(inner_e), {}
+
+    # =========================================================================
     
     try:
-        text, _ = await asyncio.to_thread(
-            _sync_stream_consumption,
-            user_prompt,
-            system_instruction,
-            LOCAL_MAX_TOKENS,
-            writer
-        )
+        if use_streaming:
+            text, _ = await asyncio.to_thread(
+                _sync_stream_consumption,
+                user_prompt,
+                system_instruction,
+                LOCAL_MAX_TOKENS,
+                writer
+            )
+        else:
+            text, _ = await asyncio.to_thread(
+                _sync_direct_call,
+                user_prompt,
+                system_instruction,
+                LOCAL_MAX_TOKENS
+            )
         final_answer = text
     except Exception as e:
-        error_msg = f"Error generating simple task report with RPO: {e}"
+        error_msg = f"Error generating simple task report: {e}"
         print(f"[Simple Task] Generation Failed: {e}")
         final_answer = error_msg
 

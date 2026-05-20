@@ -1,0 +1,20 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "python",
+            "type": "shell",
+            "command": "/home/zhangziheng/miniconda3/envs/thinkdepth/bin/python",  #这个是虚拟环境 conda info --envs 可以看虚拟环境的地址
+            "args": [
+                "${file}"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$eslint-compact"
+            ]
+        }
+    ]
+}
