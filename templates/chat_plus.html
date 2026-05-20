@@ -873,18 +873,6 @@ body.resizing-rail .rail-resize-handle::after {
   border: 1px solid var(--border-light); background: #fafafa;
 }
 
-/* Alarm capability rail */
-.cap-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.cap-card {
-  padding: 14px 12px; border-radius: var(--radius-sm);
-  text-align: center; border: 1px solid var(--border-light);
-  background: #fff; cursor: pointer; transition: all 0.15s;
-}
-.cap-card:hover { border-color: var(--primary); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
-.cap-card-icon { font-size: 22px; margin-bottom: 6px; }
-.cap-card-title { font-size: 12px; font-weight: 700; color: var(--text-primary); }
-.cap-card-desc { font-size: 10.5px; color: var(--text-muted); margin-top: 2px; }
-
 /* Diagnosis card on rail */
 .diag-rail-card {
   padding: 12px 14px; border-radius: var(--radius-sm);
@@ -1426,7 +1414,7 @@ const TASK_TYPE_META = {
   },
   alerting: {
     icon: '⚠️', title: '异常预警', tag: '告警分析', tagColor: 'orange', railShow: true,
-    railTitle: '告警工具箱', railMeta: '快速复用本次分析能力',
+    railTitle: '查询面板', railMeta: 'SQL 语句 · 数据预览',
   },
   troubleshooting: {
     icon: '🔍', title: '故障钻探', tag: '根因诊断', tagColor: 'red', railShow: true,
@@ -1603,8 +1591,8 @@ function renderRail(tt) {
   const _hasSql = Array.isArray(cs.executed_sqls) && cs.executed_sqls.some(s => String(s||'').trim());
   const _hasData = cs.sql_table && cs.sql_table.columns && cs.sql_table.rows && cs.sql_table.rows.length;
 
-  // --- station_device_td: SQL + Data tabs ---
-  if (tt === 'station_device_td') {
+  // --- station_device_td / alerting: SQL + Data tabs（与其他查库类一致）
+  if (tt === 'station_device_td' || tt === 'alerting') {
     const tabs = [
       { id: 'sql',  label: 'SQL',  show: true },
       { id: 'data', label: '数据', show: true },
@@ -1615,24 +1603,6 @@ function renderRail(tt) {
     ).join('');
     if (active === 'data') bodyEl.innerHTML = renderRailDataTab(cs);
     else bodyEl.innerHTML = renderRailSqlTab(cs);
-    renderMathSafely(bodyEl);
-    return;
-  }
-
-  // --- alerting: capability cards + SQL/Data tabs ---
-  if (tt === 'alerting') {
-    const tabs = [
-      { id: 'overview', label: '概览' },
-      { id: 'sql',      label: 'SQL' },
-      { id: 'data',     label: '数据' },
-    ];
-    const active = (['overview','sql','data'].includes(railActiveTab)) ? railActiveTab : 'overview';
-    tabsEl.innerHTML = tabs.map(t =>
-      `<div class="rail-tab ${t.id===active?'active':''}" onclick="setRailTab('${t.id}')">${t.label}</div>`
-    ).join('');
-    if (active === 'sql') bodyEl.innerHTML = renderRailSqlTab(cs);
-    else if (active === 'data') bodyEl.innerHTML = renderRailDataTab(cs);
-    else bodyEl.innerHTML = renderAlarmCapabilityRail();
     renderMathSafely(bodyEl);
     return;
   }
@@ -1748,55 +1718,6 @@ function renderRailDataTab(cs) {
         ).join('')}</tbody>
       </table>
     </div>`;
-}
-
-function renderAlarmCapabilityRail() {
-  const cs = (activeCardId && cardState.get(activeCardId)) || {};
-  const sum = cs.alarm_summary || {};
-  let topHtml = '';
-  if (sum.total) {
-    topHtml += `
-      <div class="diag-rail-card">
-        <div class="diag-rail-card-title">告警概览</div>
-        <div class="diag-rail-card-body">
-          共 <strong>${sum.total}</strong> 条告警 · 涉及 <strong>${sum.cells_involved||0}</strong> 个电芯<br>
-          平均严重度 <strong>${sum.avg_severity||0}</strong> / 最大严重度 <strong>${sum.max_severity||0}</strong>
-        </div>
-      </div>`;
-  }
-  topHtml += `
-    <div class="cap-grid">
-      <div class="cap-card" onclick="reuseQuery('告警归纳')">
-        <div class="cap-card-icon">📋</div>
-        <div class="cap-card-title">告警归纳</div>
-        <div class="cap-card-desc">类型/数量/分布</div>
-      </div>
-      <div class="cap-card" onclick="reuseQuery('类型分析')">
-        <div class="cap-card-icon">🥧</div>
-        <div class="cap-card-title">类型分析</div>
-        <div class="cap-card-desc">关键词聚类</div>
-      </div>
-      <div class="cap-card" onclick="reuseQuery('同期对比')">
-        <div class="cap-card-icon">📈</div>
-        <div class="cap-card-title">同期对比</div>
-        <div class="cap-card-desc">环比/同比</div>
-      </div>
-      <div class="cap-card" onclick="downloadReport()">
-        <div class="cap-card-icon">📄</div>
-        <div class="cap-card-title">HTML 报告</div>
-        <div class="cap-card-desc">导出含图表的单文件 HTML</div>
-      </div>
-    </div>`;
-  return topHtml;
-}
-
-function reuseQuery(action) {
-  const f = document.getElementById('inputField');
-  const cur = f.value.trim();
-  const ext = cur ? `${cur}\n${action}：` : `请对当前告警进行${action}。`;
-  f.value = ext;
-  updateCharCount();
-  f.focus();
 }
 
 // ==========================================

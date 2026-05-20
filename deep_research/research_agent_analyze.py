@@ -424,7 +424,8 @@ def _rule_based_evidence_bundle(
         "abnormal_topn": [],
         "td_metrics_summary": [],
         "station_td_query_purpose": "unknown",
-        "diagnosis_conclusion": "LLM 未返回可解析 JSON，已根据查询结果做规则化摘要。",
+        # 留空以免覆盖前端基于 alarm_summary 的用户向结论（JSON 解析失败见 db_llm_traces）
+        "diagnosis_conclusion": "",
         "evidence_sufficiency": "一般",
         "next_action_suggestion": "若需更准的关键词统计，可缩小时间窗或加 cell 条件后重试。",
         "mcp_chart_hint": "",
