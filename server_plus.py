@@ -739,6 +739,7 @@ def _maybe_call_multimodal(
     system_instruction: str,
     *,
     label: str = "sync",
+    max_tokens: Optional[int] = None,
 ) -> Optional[Tuple[str, Dict[str, Any]]]:
     """如果当前阶段判定需要多模态 + 有可用图片，则发起 multimodal 调用并返回结果。
 
@@ -762,10 +763,12 @@ def _maybe_call_multimodal(
         f"(idx 1..{len(image_paths)})",
         flush=True,
     )
+    out_tokens = int(max_tokens) if max_tokens and int(max_tokens) > 0 else 15000
     text, usage = gemini_chat_once_http(
         user_text,
         augmented_sys,
         images=image_paths,
+        max_tokens=out_tokens,
     )
     return text, usage
 
@@ -780,7 +783,12 @@ try:
         # ── 多模态短路：报告阶段且有 RAG 命中图，则牺牲流式改走 sync multimodal ──
         # 流式 RPO 接口不支持 images；为了"图文联合推理"，在最关键的最终答案
         # 调用上短路成 sync 多模态。文本仍写入 stream_buffer，UI 体感是"一次性出文"。
-        mm = _maybe_call_multimodal(user_text, system_instruction, label="rpo")
+        mm = _maybe_call_multimodal(
+            user_text,
+            system_instruction,
+            label="rpo",
+            max_tokens=kwargs.get("max_tokens"),
+        )
         if mm is not None:
             text, usage = mm
             SHARED_STATE["stream_buffer"] = text
@@ -822,7 +830,7 @@ def _gemini_chat_sync_lc(messages: List[BaseMessage]) -> AIMessage:
     user_text = "\n".join(user_parts)
 
     # ── 报告阶段 + 有 RAG 命中图 → 走多模态 ──
-    mm = _maybe_call_multimodal(user_text, sys_text, label="sync_lc")
+    mm = _maybe_call_multimodal(user_text, sys_text, label="sync_lc", max_tokens=15000)
     if mm is not None:
         return AIMessage(content=mm[0])
 
@@ -1804,6 +1812,7 @@ async def background_graph_runner(
     question: str,
     deep_mode: bool = False,
     prior_turns: Optional[List[str]] = None,
+    clarify_route: Optional[str] = None,
 ):
     global CURRENT_THREAD_ID
     run_sess = SHARED_STATE.get("run_session")
@@ -1864,6 +1873,18 @@ async def background_graph_runner(
             inputs["db_chain_log_path"] = str(run_sess.db_chain_log_path)
             inputs["db_plan_sanitizer_log_path"] = str(run_sess.db_plan_sanitizer_log_path)
             inputs["db_sanitizer_log_enabled"] = run_sess.log_profile == "full"
+
+        locked_clarify = (clarify_route or "").strip()
+        if locked_clarify:
+            inputs["clarify_route"] = locked_clarify
+            try:
+                from deep_research.clarify_route import locked_task_type, normalize_clarify_route
+
+                forced_tt = locked_task_type(normalize_clarify_route(locked_clarify))
+                if forced_tt:
+                    SHARED_STATE["task_type"] = forced_tt
+            except Exception:
+                pass
 
         config = {"configurable": {"thread_id": CURRENT_THREAD_ID}}
 
@@ -2218,6 +2239,7 @@ async def api_asr_transcribe(audio: UploadFile = File(...)):
 class ChatRequest(BaseModel):
     message: str
     mode: str = "fast"
+    clarify_route: Optional[str] = None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -2292,7 +2314,14 @@ async def api_chat(req: ChatRequest):
     prior_turns = _build_prior_turns(SHARED_STATE["chat_history"], max_pairs=5)
     deep_mode = req.mode == "deep"
 
-    asyncio.create_task(background_graph_runner(req.message, deep_mode=deep_mode, prior_turns=prior_turns))
+    asyncio.create_task(
+        background_graph_runner(
+            req.message,
+            deep_mode=deep_mode,
+            prior_turns=prior_turns,
+            clarify_route=req.clarify_route,
+        )
+    )
 
     return {
         "status": "started",

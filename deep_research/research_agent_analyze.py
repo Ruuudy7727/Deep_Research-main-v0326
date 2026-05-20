@@ -24,6 +24,11 @@ from .prompts import (
     db_evidence_summarizer_prompt,
 )
 from .state_scope import AgentState
+from .clarify_route import (
+    assess_locked_route_readiness,
+    build_locked_route_json,
+    normalize_clarify_route,
+)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -1306,125 +1311,174 @@ async def retrieve_battery_node(state: AgentState):
     )
 
     server_now_ctx = _server_now_injection_text()
+    locked_clarify = normalize_clarify_route(state.get("clarify_route"))
+    route_json: Dict[str, Any]
 
-    try:
-        route_prompt = (
-            db_intent_router_prompt.replace("{server_now}", server_now_ctx).replace("{user_req}", str(user_req))
-        )
-        route_json, raw_route_text = await _invoke_json_llm_with_raw(route_prompt)
+    if locked_clarify:
+        route_json = build_locked_route_json(locked_clarify, supervisor_params)
+        route_json["device_scope"] = _merge_scope(route_json.get("device_scope", {}), supervisor_params)
         db_llm_traces["1_intent_router"] = {
             "step": "db_intent_router",
-            "raw_response": raw_route_text,
+            "skipped": True,
+            "clarify_route_locked": locked_clarify,
             "parsed": route_json,
         }
         emit_chain_event(
-            "llm_intent_router",
+            "llm_intent_router_skipped",
+            clarify_route=locked_clarify,
             parsed=route_json,
-            raw_response=_clip_for_log(raw_route_text),
         )
-        _print_db_llm_truncate("1_intent_router", raw_route_text)
-    except LlmJsonParseError as e:
-        raw_route_text = e.raw
-        db_llm_traces["1_intent_router"] = {
-            "step": "db_intent_router",
-            "error": str(e),
-            "partial_raw": e.raw,
-        }
-        emit_chain_event(
-            "llm_intent_router_error",
-            error=str(e),
-            raw_response=_clip_for_log(e.raw),
-            partial_raw=_clip_for_log(e.raw),
+        ready, narrow_question = assess_locked_route_readiness(
+            locked_clarify, route_json.get("device_scope") or {}, str(user_req)
         )
-        return {
-            "raw_db_results": [{"error": f"路由 JSON 解析失败: {e}"}],
-            "db_route": "alerting",
-            "db_llm_traces": db_llm_traces,
-        }
-    except Exception as e:
-        db_llm_traces["1_intent_router"] = {
-            "step": "db_intent_router",
-            "error": str(e),
-            "partial_raw": raw_route_text,
-        }
-        emit_chain_event(
-            "llm_intent_router_error",
-            error=str(e),
-            partial_raw=_clip_for_log(raw_route_text),
-        )
-        return {
-            "raw_db_results": [{"error": f"路由解析失败: {e}"}],
-            "db_route": "alerting",
-            "db_llm_traces": db_llm_traces,
-        }
+        if not ready:
+            emit_chain_event(
+                "clarification_needed",
+                route="clarification_needed",
+                clarify_route_locked=locked_clarify,
+                clarify_question=narrow_question,
+                clarify_candidates=[],
+            )
+            return {
+                "db_route": "clarification_needed",
+                "clarify_route": "",
+                "db_query_params": {
+                    "clarify_question": narrow_question,
+                    "clarify_candidates": [],
+                },
+                "raw_db_results": [{"error": f"需要补充信息: {narrow_question}"}],
+                "db_evidence_bundle": {
+                    "route_used": route_json.get("route", "unknown"),
+                    "station_td_query_purpose": "unknown",
+                    "diagnosis_conclusion": "当前信息不足，未执行查询。",
+                    "evidence_sufficiency": "不足",
+                    "next_action_suggestion": narrow_question,
+                    "mcp_chart_hint": "",
+                    "confidence": 1.0,
+                },
+                "db_llm_traces": db_llm_traces,
+            }
+    else:
+        try:
+            route_prompt = (
+                db_intent_router_prompt.replace("{server_now}", server_now_ctx).replace("{user_req}", str(user_req))
+            )
+            route_json, raw_route_text = await _invoke_json_llm_with_raw(route_prompt)
+            db_llm_traces["1_intent_router"] = {
+                "step": "db_intent_router",
+                "raw_response": raw_route_text,
+                "parsed": route_json,
+            }
+            emit_chain_event(
+                "llm_intent_router",
+                parsed=route_json,
+                raw_response=_clip_for_log(raw_route_text),
+            )
+            _print_db_llm_truncate("1_intent_router", raw_route_text)
+        except LlmJsonParseError as e:
+            raw_route_text = e.raw
+            db_llm_traces["1_intent_router"] = {
+                "step": "db_intent_router",
+                "error": str(e),
+                "partial_raw": e.raw,
+            }
+            emit_chain_event(
+                "llm_intent_router_error",
+                error=str(e),
+                raw_response=_clip_for_log(e.raw),
+                partial_raw=_clip_for_log(e.raw),
+            )
+            return {
+                "raw_db_results": [{"error": f"路由 JSON 解析失败: {e}"}],
+                "db_route": "alerting",
+                "db_llm_traces": db_llm_traces,
+            }
+        except Exception as e:
+            db_llm_traces["1_intent_router"] = {
+                "step": "db_intent_router",
+                "error": str(e),
+                "partial_raw": raw_route_text,
+            }
+            emit_chain_event(
+                "llm_intent_router_error",
+                error=str(e),
+                partial_raw=_clip_for_log(raw_route_text),
+            )
+            return {
+                "raw_db_results": [{"error": f"路由解析失败: {e}"}],
+                "db_route": "alerting",
+                "db_llm_traces": db_llm_traces,
+            }
+
+        route = str(route_json.get("route", "clarification_needed"))
+        confidence = float(route_json.get("confidence", 0.0) or 0.0)
+        need_clarification = bool(route_json.get("need_clarification")) or confidence < 0.65 or route == "clarification_needed"
+        if need_clarification:
+            question = route_json.get("clarify_question") or "请补充设备定位（box/cluster/pack/cell）以及时间范围。"
+            clarify_candidates = [
+                {
+                    "id": "station_device_td",
+                    "icon": "📊",
+                    "title": "设备实时查询",
+                    "desc": "查 box_data / cluster_data / bmu_data 时序趋势",
+                    "hint": "请补充设备编码（bmu_code/cluster_code/box_code）和时间范围",
+                },
+                {
+                    "id": "alerting",
+                    "icon": "⚠️",
+                    "title": "异常预警",
+                    "desc": "查 alarm_event / volt_temp_abnormal_result 告警摘要",
+                    "hint": "请补充设备/站点范围和关注的时间段",
+                },
+                {
+                    "id": "troubleshooting_dcr",
+                    "icon": "🔍",
+                    "title": "故障钻探 · 内阻异常",
+                    "desc": "查内阻异常电芯汇总表",
+                    "hint": "请补充 pack/bmu 编码和时间范围",
+                },
+                {
+                    "id": "troubleshooting_isc",
+                    "icon": "🔍",
+                    "title": "故障钻探 · ISC评分",
+                    "desc": "查 ISC 评分表（微短路/内短路评分）",
+                    "hint": "请补充 bmu_code 和滑窗时间范围",
+                },
+                {
+                    "id": "troubleshooting_cap",
+                    "icon": "🔍",
+                    "title": "故障钻探 · 容量不一致",
+                    "desc": "查容量不一致电芯表",
+                    "hint": "请补充 bmu_code 和电芯号",
+                },
+            ]
+            emit_chain_event(
+                "clarification_needed",
+                route=route,
+                confidence=confidence,
+                clarify_question=question,
+                clarify_candidates=clarify_candidates,
+            )
+            return {
+                "db_route": "clarification_needed",
+                "db_query_params": {
+                    "clarify_question": question,
+                    "clarify_candidates": clarify_candidates,
+                },
+                "raw_db_results": [{"error": f"需要补充信息: {question}"}],
+                "db_evidence_bundle": {
+                    "route_used": "unknown",
+                    "station_td_query_purpose": "unknown",
+                    "diagnosis_conclusion": "当前信息不足，未执行查询。",
+                    "evidence_sufficiency": "不足",
+                    "next_action_suggestion": question,
+                    "mcp_chart_hint": "",
+                    "confidence": round(confidence, 3),
+                },
+                "db_llm_traces": db_llm_traces,
+            }
 
     route = str(route_json.get("route", "clarification_needed"))
-    confidence = float(route_json.get("confidence", 0.0) or 0.0)
-    need_clarification = bool(route_json.get("need_clarification")) or confidence < 0.65 or route == "clarification_needed"
-    if need_clarification:
-        question = route_json.get("clarify_question") or "请补充设备定位（box/cluster/pack/cell）以及时间范围。"
-        clarify_candidates = [
-            {
-                "id": "station_device_td",
-                "icon": "📊",
-                "title": "设备实时查询",
-                "desc": "查 box_data / cluster_data / bmu_data 时序趋势",
-                "hint": "请补充设备编码（bmu_code/cluster_code/box_code）和时间范围",
-            },
-            {
-                "id": "alerting",
-                "icon": "⚠️",
-                "title": "异常预警",
-                "desc": "查 alarm_event / volt_temp_abnormal_result 告警摘要",
-                "hint": "请补充设备/站点范围和关注的时间段",
-            },
-            {
-                "id": "troubleshooting_dcr",
-                "icon": "🔍",
-                "title": "故障钻探 · 内阻异常",
-                "desc": "查内阻异常电芯汇总表",
-                "hint": "请补充 pack/bmu 编码和时间范围",
-            },
-            {
-                "id": "troubleshooting_isc",
-                "icon": "🔍",
-                "title": "故障钻探 · ISC评分",
-                "desc": "查 ISC 评分表（微短路/内短路评分）",
-                "hint": "请补充 bmu_code 和滑窗时间范围",
-            },
-            {
-                "id": "troubleshooting_cap",
-                "icon": "🔍",
-                "title": "故障钻探 · 容量不一致",
-                "desc": "查容量不一致电芯表",
-                "hint": "请补充 bmu_code 和电芯号",
-            },
-        ]
-        emit_chain_event(
-            "clarification_needed",
-            route=route,
-            confidence=confidence,
-            clarify_question=question,
-            clarify_candidates=clarify_candidates,
-        )
-        return {
-            "db_route": "clarification_needed",
-            "db_query_params": {
-                "clarify_question": question,
-                "clarify_candidates": clarify_candidates,
-            },
-            "raw_db_results": [{"error": f"需要补充信息: {question}"}],
-            "db_evidence_bundle": {
-                "route_used": "unknown",
-                "station_td_query_purpose": "unknown",
-                "diagnosis_conclusion": "当前信息不足，未执行查询。",
-                "evidence_sufficiency": "不足",
-                "next_action_suggestion": question,
-                "mcp_chart_hint": "",
-                "confidence": round(confidence, 3),
-            },
-            "db_llm_traces": db_llm_traces,
-        }
 
     route_json["device_scope"] = _merge_scope(route_json.get("device_scope", {}), supervisor_params)
 
@@ -1670,7 +1724,7 @@ async def retrieve_battery_node(state: AgentState):
         total_rows_deduped=len(deduped_rows),
         tables=list(per_table.keys()),
     )
-    return {
+    result = {
         "db_route": route,
         "db_query_params": route_json.get("device_scope", {}),
         "db_query_plans": plans,
@@ -1685,3 +1739,6 @@ async def retrieve_battery_node(state: AgentState):
             else (all_rows if all_rows else [{"error": "未查询到结果。"}])
         ),
     }
+    if locked_clarify:
+        result["clarify_route"] = ""
+    return result

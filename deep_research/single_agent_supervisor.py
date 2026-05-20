@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 # === 项目内部依赖 ===
 from .state_scope import AgentState
+from .clarify_route import build_clarify_route_hint, locked_task_type, normalize_clarify_route
 from .gemini_chat import gemini_chat_once, gemini_chat_once_rpo
 from .prompts import *
 
@@ -261,9 +262,12 @@ async def single_supervisor_node(state: AgentState):
         )
 
     contextual_user_req = user_req
+    locked_clarify = normalize_clarify_route(state.get("clarify_route"))
+    if locked_clarify:
+        contextual_user_req = user_req + build_clarify_route_hint(locked_clarify)
     if extra_context_parts:
         contextual_user_req = (
-            user_req
+            contextual_user_req
             + "\n\n"
             + "\n\n".join(extra_context_parts)
             + "\n\n【路由提示】：如果当前请求依赖上文（出现 以上/上面/刚才/之前/再画一下 等代词），"
@@ -281,21 +285,33 @@ async def single_supervisor_node(state: AgentState):
         clean_json = _extract_first_json_object(resp_text or "")
         if not clean_json:
             _log_supervisor_parse_failure("no JSON object found in LLM output", resp_text or "")
-            return {
+            fallback = {
                 "supervisor_route": "DIRECT",
                 "supervisor_params": {},
                 "task_type": _infer_task_type("DIRECT", {}, user_req),
             }
+            if locked_clarify:
+                fallback["supervisor_route"] = "DATABASE"
+                forced_tt = locked_task_type(locked_clarify)
+                if forced_tt:
+                    fallback["task_type"] = forced_tt
+            return fallback
 
         try:
             decision_data = json.loads(clean_json)
         except json.JSONDecodeError as e:
             _log_supervisor_parse_failure(f"json.JSONDecodeError: {e}", resp_text or "")
-            return {
+            fallback = {
                 "supervisor_route": "DIRECT",
                 "supervisor_params": {},
                 "task_type": _infer_task_type("DIRECT", {}, user_req),
             }
+            if locked_clarify:
+                fallback["supervisor_route"] = "DATABASE"
+                forced_tt = locked_task_type(locked_clarify)
+                if forced_tt:
+                    fallback["task_type"] = forced_tt
+            return fallback
 
         next_action = decision_data.get("next_action", "DIRECT")
         if isinstance(next_action, str):
@@ -307,6 +323,12 @@ async def single_supervisor_node(state: AgentState):
             params = {}
 
         task_type = _normalize_task_type(decision_data.get("task_type"), next_action, params, user_req)
+
+        if locked_clarify:
+            next_action = "DATABASE"
+            forced_tt = locked_task_type(locked_clarify)
+            if forced_tt:
+                task_type = forced_tt
 
         print(f">>> [Supervisor Decision]: {next_action}")
         print(f">>> [Supervisor Params]: {params}")
@@ -321,11 +343,17 @@ async def single_supervisor_node(state: AgentState):
     except Exception as e:
         _log_supervisor_parse_failure(f"{type(e).__name__}: {e}", resp_text)
         print(f"[Supervisor Error]: {e}, defaulting to DIRECT.", flush=True)
-        return {
+        fallback = {
             "supervisor_route": "DIRECT",
             "supervisor_params": {},
             "task_type": _infer_task_type("DIRECT", {}, user_req),
         }
+        if locked_clarify:
+            fallback["supervisor_route"] = "DATABASE"
+            forced_tt = locked_task_type(locked_clarify)
+            if forced_tt:
+                fallback["task_type"] = forced_tt
+        return fallback
 
 
 # =============================================================================
@@ -553,11 +581,7 @@ async def execute_tools_node(state: AgentState):
             if not final_obs: 
                 final_obs = "未能在知识库中检索到相关信息。"
 
-            # 4. 更新 Context，限制检索结果长度为 1000 字符以加快响应
-            max_retrieval_chars = 1000
-            if len(final_obs) > max_retrieval_chars:
-                final_obs = final_obs[:max_retrieval_chars] + "...(已截断)"
-            
+            # 4. 更新 Context
             log_msg = f"Retrieval tool executed. Query: {query_term}"
             updates["pre_brief_cases"] = current_context + f"\n\n【Local Knowledge Base Result】:\n{final_obs}"
             updates["supervisor_messages"] = [log_msg]
@@ -608,22 +632,19 @@ async def solve_simple_task(state: AgentState, writer=None) -> dict:
     if not retrieved_info:
         print("Warning: No retrieved info found in state (Pure Chat Mode).", flush=True)
 
-    # 先确定 route 和 task_type
+    # 读取最近对话历史
+    history_str = _get_recent_history_str(state, k=5, max_chars=1500)
+    history_block = ""
+    if history_str:
+        history_block = (
+            '\n\n最近对话历史（用于理解"以上/上面/之前"等指代）:\n' + history_str + "\n"
+        )
+
+    print("--- [Simple Path] Synthesizing Answer... ---", flush=True)
+
     route = str(state.get("supervisor_route") or "DIRECT").upper()
     task_type = str(state.get("task_type") or "").strip().lower()
     use_direct_demo_few_shots = route == "DIRECT" or task_type == "direct"
-
-    # 读取最近对话历史（仅 DIRECT 路径需要，RETRIEVE 路径跳过以加快响应）
-    history_str = ""
-    history_block = ""
-    if route == "DIRECT":
-        history_str = _get_recent_history_str(state, k=5, max_chars=800)
-        if history_str:
-            history_block = (
-                '\n\n最近对话历史（用于理解"以上/上面/之前"等指代）:\n' + history_str + "\n"
-            )
-
-    print("--- [Simple Path] Synthesizing Answer... ---", flush=True)
 
     # 定义系统指令
     system_instruction = (
@@ -677,20 +698,11 @@ async def solve_simple_task(state: AgentState, writer=None) -> dict:
         f"{closing}"
     )
 
-    # 根据路由选择合适的 max_tokens 和调用方式
-    # RETRIEVE: 使用非流式 (sync) 以减少开销，max_tokens=2048
-    # 其他路径: 保持流式，但也降低到 2048
-    if route == "RETRIEVE" or task_type == "kb_retrieval":
-        LOCAL_MAX_TOKENS = 2048
-        use_streaming = False
-    else:
-        LOCAL_MAX_TOKENS = 2048
-        use_streaming = True
-
+    LOCAL_MAX_TOKENS = 4096
     final_answer = ""
 
     # =========================================================================
-    # [流式处理] Wrapper 函数 (RPO)
+    # [流式处理] Wrapper 函数
     # =========================================================================
     def _sync_stream_consumption(u_text, sys_inst, max_tok, stream_writer):
         print("\n⚡ [RPO Stream Start] ...", flush=True)
@@ -730,45 +742,18 @@ async def solve_simple_task(state: AgentState, writer=None) -> dict:
             return final_txt if 'final_txt' in locals() else str(inner_e), {}
 
     # =========================================================================
-    # [非流式处理] Wrapper 函数 (Sync Direct)
-    # =========================================================================
-    def _sync_direct_call(u_text, sys_inst, max_tok):
-        print("\n⚡ [Sync Call Start] ...", flush=True)
-        try:
-            text, usage = gemini_chat_once(
-                user_text=u_text,
-                system_instruction=sys_inst,
-                temperature=0.3,
-                max_tokens=max_tok
-            )
-            print(text)
-            print("\n\n✅ [Sync Call End]\n", flush=True)
-            return text, usage
-        except Exception as inner_e:
-            print(f"\n❌ [Sync Call Error]: {inner_e}", flush=True)
-            return str(inner_e), {}
-
-    # =========================================================================
     
     try:
-        if use_streaming:
-            text, _ = await asyncio.to_thread(
-                _sync_stream_consumption,
-                user_prompt,
-                system_instruction,
-                LOCAL_MAX_TOKENS,
-                writer
-            )
-        else:
-            text, _ = await asyncio.to_thread(
-                _sync_direct_call,
-                user_prompt,
-                system_instruction,
-                LOCAL_MAX_TOKENS
-            )
+        text, _ = await asyncio.to_thread(
+            _sync_stream_consumption,
+            user_prompt,
+            system_instruction,
+            LOCAL_MAX_TOKENS,
+            writer
+        )
         final_answer = text
     except Exception as e:
-        error_msg = f"Error generating simple task report: {e}"
+        error_msg = f"Error generating simple task report with RPO: {e}"
         print(f"[Simple Task] Generation Failed: {e}")
         final_answer = error_msg
 

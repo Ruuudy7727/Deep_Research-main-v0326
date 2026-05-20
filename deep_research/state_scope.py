@@ -92,6 +92,8 @@ class AgentState(TypedDict, total=False):
     # 由 supervisor 路由 LLM 显式输出，或在缺失时由 _infer_task_type 推断；
     # 深度研究分支会被强制覆盖为 deep_research。
     task_type: Annotated[str, overwrite]
+    # 用户点击 DB 澄清卡片后传入，锁定 db_route / target_tables（单次）
+    clarify_route: Annotated[str, overwrite]
 
     # === 工具输出字段 ===
     # 图表 URL (由 generate_chart_node 更新)

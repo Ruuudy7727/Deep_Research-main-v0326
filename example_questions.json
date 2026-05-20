@@ -28,7 +28,7 @@
     "category_id": "kb_retrieval",
     "category": "储能知识库检索",
     "mode": "fast",
-    "question": "耐湿热实验有哪些步骤?",
+    "question": "电芯失效分析流程是怎样的？",
     "description": "操作流程检索 · 步骤+插图"
   },
   {
@@ -52,19 +52,11 @@
     "category_id": "station_device_td",
     "category": "设备实时查询",
     "mode": "fast",
-    "question": "查询当前设备状态",
-    "description": "缺少设备与时间时可触发候选澄清"
+    "question": "bmu 00023002001001001 这个设备在昨天凌晨1.10-1.20的状态如何？并且画出温度变化图",
+    "description": "设备实时动态监测"
   },
   {
     "id": 8,
-    "category_id": "alerting",
-    "category": "异常预警",
-    "mode": "fast",
-    "question": "给我 pack-7 最近2026年3月22日的 summary_cn 里高频异常关键词和重复模式",
-    "description": "alarm_event · 高频关键词分析"
-  },
-  {
-    "id": 9,
     "category_id": "alerting",
     "category": "异常预警",
     "mode": "fast",
@@ -72,7 +64,7 @@
     "description": "alarm_event · 类型归纳"
   },
   {
-    "id": 10,
+    "id": 9,
     "category_id": "alerting",
     "category": "异常预警",
     "mode": "fast",
@@ -80,47 +72,47 @@
     "description": "alarm_event · 严重度排序"
   },
   {
-    "id": 11,
+    "id": 10,
     "category_id": "troubleshooting",
-    "category": "故障钻探",
+    "category": "故障钻探 dcr",
     "mode": "fast",
     "question": "找出2026年3月的00256006001009006pack之下内阻异常超过5天的电芯数据",
     "description": "内阻异常电芯汇总表"
   },
   {
-    "id": 12,
+    "id": 11,
     "category_id": "troubleshooting",
-    "category": "故障钻探",
+    "category": "故障钻探 isc",
     "mode": "fast",
     "question": "列出 bmu_code='00256001001001001' 且 2026 年 3 月滑窗内 microshort_score 高于 0.6 的电芯，按分降序",
     "description": "ISC 评分表"
   },
   {
-    "id": 13,
+    "id": 12,
     "category_id": "troubleshooting",
-    "category": "故障钻探",
+    "category": "故障钻探 capacity",
     "mode": "fast",
     "question": "今年以来，BMU 00256001001004002 里，电芯 31 容量不一致的异常原因、方向、置信度分别是什么？首次与最近一次判定时间各是什么时候？",
     "description": "容量不一致电芯表"
+  },
+  {
+    "id": 13,
+    "category_id": "deep_research",
+    "category": "深度检索",
+    "mode": "deep",
+    "question": "某电芯在多个循环中表现为：中段电压平台差异不大；放电末端电压更早塌陷；高倍率下压降更明显；低倍率下容量差异相对较小。请分析这更可能说明什么问题，并给出你的推理链条。",
+    "description": "深度推理 · 图文证据"
   },
   {
     "id": 14,
     "category_id": "deep_research",
     "category": "深度检索",
     "mode": "deep",
-    "question": "在分析电压数据时，有些电芯并不是全程充电电压偏高(偏低)，放电电压偏低(偏高)，例如：在磷酸铁锂-石墨电池包里，电池串联，电芯2充电<80%SOC电压最低，>80%SOC正常；放电电压全程最高，电芯2的故障是什么？",
-    "description": "深度推理 · 图文证据 · 多智能体"
+    "question": "某研究者希望只用 V、 I、 T 信号构建运维算法，同时兼顾状态估计、异常分析和机理解释。请分析这种思路为什么有吸引力，以及最大的技术难点在哪里？",
+    "description": "深度推理 · 深入研究"
   },
   {
     "id": 15,
-    "category_id": "deep_research",
-    "category": "深度检索",
-    "mode": "deep",
-    "question": "在磷酸铁锂-石墨电池包中，电池串联，某电芯充电过程全程最低，电压放电过程由最高变化到最低，放电>20%SOC最高，<20%SOC电压最低，放电后的静置过程中电压也是最低，但充电后静置过程中电压排名会升高。此外，该电池的阻抗在整个电池包中最小，其阻抗值波动性最大。该电芯可能发生了什么故障？",
-    "description": "深度推理 · 多模态证据"
-  },
-  {
-    "id": 16,
     "category_id": "deep_research",
     "category": "深度检索",
     "mode": "deep",
@@ -128,11 +120,11 @@
     "description": "深度推理 · 经典阻抗故障"
   },
   {
-    "id": 17,
+    "id": 16,
     "category_id": "deep_research",
     "category": "深度检索",
     "mode": "deep",
-    "question": "在磷酸铁锂-石墨电池包中，电池串联，某电芯充电<80%SOC正常，>80%SOC偏高，放电全程正常。且该电池阻抗中等。该电芯是什么故障？",
-    "description": "深度推理 · 阻抗中等场景"
+    "question": "你目前只有一批实际运行数据，特点是：电流持续波动；不是满充满放；充电段少，放电段多；越接近充放末端倍率越大。如果目标是做容量相关分析，你会建议先从哪几个步骤开始？",
+    "description": "深度推理 · 应用建议"
   }
 ]

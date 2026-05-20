@@ -64,7 +64,7 @@ body {
   color: var(--text-primary);
   height: calc(100vh / 1.1);
   display: grid;
-  grid-template-rows: 64px 1fr;
+  grid-template-rows: minmax(84px, auto) 1fr;
   grid-template-columns: var(--sidebar-width) 1fr var(--rail-width);
   grid-template-areas:
     "header header header"
@@ -89,26 +89,27 @@ body[data-sidebar="collapsed"][data-rail="hidden"] {
   border-bottom: 1px solid rgba(255,255,255,0.18);
   padding: 0 28px;
   display: flex; align-items: center; justify-content: space-between;
+  min-height: 84px;
   z-index: 50;
   box-shadow: 0 10px 30px rgba(24, 148, 210, 0.12);
 }
-.brand { display: flex; align-items: center; gap: 14px; }
+.brand { display: flex; align-items: center; gap: 18px; }
 .brand-logo {
-  width: 52px; height: 40px;
-  border-radius: 12px;
+  width: 64px; height: 48px;
+  border-radius: 14px;
   display: flex; align-items: center; justify-content: center;
   overflow: hidden;
-  background: rgba(255,255,255,0.16);
-  border: 1px solid rgba(255,255,255,0.22);
+  background: rgba(255,255,255,0.18);
+  border: 1px solid rgba(255,255,255,0.24);
 }
 .brand-logo img {
   width: 100%; height: 100%;
   object-fit: contain;
 }
-.brand-text h1 { font-size: 17px; font-weight: 700; color: white; letter-spacing: 0.2px; }
-.brand-text p { font-size: 12px; color: rgba(255,255,255,0.85); margin-top: 2px; }
+.brand-text h1 { font-size: 18px; font-weight: 700; color: white; letter-spacing: 0.2px; }
+.brand-text p { font-size: 13px; color: rgba(255,255,255,0.9); margin-top: 2px; }
 
-.header-right { display: flex; align-items: center; gap: 14px; font-size: 13px; color: white; }
+.header-right { display: flex; align-items: center; gap: 16px; font-size: 13px; color: white; }
 
 .status-pill {
   background: rgba(255,255,255,0.18); color: white;
@@ -121,22 +122,21 @@ body[data-sidebar="collapsed"][data-rail="hidden"] {
 }
 .status-pill {
   display: inline-flex; align-items: center; gap: 8px;
-  padding: 6px 14px; border-radius: 999px;
-  background: var(--green-bg); color: var(--green); font-weight: 600;
+  padding: 8px 16px; border-radius: 999px;
   font-size: 12px; line-height: 1;
 }
-.status-pill.memory { background: var(--purple-bg); color: var(--purple); }
+.status-pill.memory { }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse-dot 2s infinite; }
 @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.4} }
 .workspace-select {
   display: inline-flex; align-items: center; gap: 8px;
-  padding: 6px 14px; border-radius: 999px;
-  background: var(--bg); color: var(--text-secondary); font-weight: 500;
-  border: 1px solid var(--border);
+  padding: 8px 16px; border-radius: 999px;
+  background: rgba(255,255,255,0.15); color: white; font-weight: 500;
+  border: 1px solid rgba(255,255,255,0.22);
 }
-.header-time { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.header-time { color: white; font-variant-numeric: tabular-nums; font-weight: 600; }
 .header-avatar {
-  width: 36px; height: 36px; border-radius: 50%;
+  width: 42px; height: 42px; border-radius: 50%;
   background: linear-gradient(135deg, #fbbf24, #f97316);
   color: white; display: flex; align-items: center; justify-content: center;
   font-weight: 700; cursor: pointer;
@@ -321,7 +321,7 @@ body[data-sidebar="collapsed"] .new-chat-btn { padding: 10px; justify-content: c
 }
 .clarify-card:hover {
   border-color: var(--primary); transform: translateY(-2px);
-  box-shadow: 0 4px 14px rgba(59,130,246,0.12);
+  box-shadow: 0 4px 14px rgba(24, 148, 210, 0.12);
 }
 .clarify-card-hd { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .clarify-card-icon { font-size: 18px; }
@@ -347,7 +347,7 @@ body[data-sidebar="collapsed"] .new-chat-btn { padding: 10px; justify-content: c
   background: var(--primary); color: white;
   padding: 10px 16px; border-radius: 16px 16px 4px 16px;
   font-size: 14px; line-height: 1.55;
-  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.18);
+  box-shadow: 0 2px 8px rgba(24, 148, 210, 0.18);
 }
 .msg-time { color: var(--text-muted); font-size: 11px; margin-top: 4px; }
 .message-user .msg-time { text-align: right; margin-right: 48px; }
@@ -397,8 +397,8 @@ body[data-sidebar="collapsed"] .new-chat-btn { padding: 10px; justify-content: c
   animation: card-glow 1.3s ease;
 }
 @keyframes card-glow {
-  0% { box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.28); border-color: var(--primary-light); }
-  70% { box-shadow: 0 0 0 10px rgba(79, 70, 229, 0); border-color: var(--primary-light); }
+  0% { box-shadow: 0 0 0 0 rgba(24, 148, 210, 0.28); border-color: var(--primary-light); }
+  70% { box-shadow: 0 0 0 10px rgba(24, 148, 210, 0); border-color: var(--primary-light); }
   100% { box-shadow: var(--shadow-sm); border-color: var(--border-light); }
 }
 
@@ -713,7 +713,7 @@ body[data-sidebar="collapsed"] .new-chat-btn { padding: 10px; justify-content: c
 .chip-rest { background: #DCFCE7; color: #15803D; }
 .chip-voltage { background: #FEE2E2; color: #B91C1C; }
 .chip-temp { background: #FEF3C7; color: #B45309; }
-.chip-current { background: #E0E7FF; color: #4338CA; }
+.chip-current { background: #E6F7FF; color: #0F6EA0; }
 .chip-cap { background: #F3E8FF; color: #7E22CE; }
 .chip-imp { background: #CCFBF1; color: #0F766E; }
 .chip-cons { background: #FCE7F3; color: #BE185D; }
@@ -1117,10 +1117,10 @@ body.resizing-rail .rail-resize-handle::after {
   color: white; font-size: 14px; font-weight: 700;
   cursor: pointer; white-space: nowrap;
   height: 48px;
-  box-shadow: 0 3px 10px rgba(79, 70, 229, 0.32);
+  box-shadow: 0 3px 10px rgba(24, 148, 210, 0.32);
   transition: all 0.15s;
 }
-.send-btn:hover { box-shadow: 0 4px 14px rgba(79, 70, 229, 0.42); transform: translateY(-1px); }
+.send-btn:hover { box-shadow: 0 4px 14px rgba(24, 148, 210, 0.42); transform: translateY(-1px); }
 .send-btn:active { transform: translateY(0); }
 .send-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
@@ -1460,8 +1460,24 @@ const FEATURE_HOVER_INTRO = {
 };
 
 const FEATURE_CARD_BRIEF = {
+  direct: '直接回答，了解系统能力边界',
+  kb_retrieval: '概念性知识库 · 图文一体证据',
+  station_device_td: 'SQL 查询 + MCP-Chart 可视化',
+  alerting: 'alarm_event · 高频关键词分析',
   troubleshooting: '内阻异常电芯汇总表 · ISC 评分表 · 容量不一致电芯表',
+  deep_research: '深度推理 · 图文证据 · 多智能体',
 };
+
+const MODULE_ORDER = ['direct', 'kb_retrieval', 'station_device_td', 'alerting', 'troubleshooting', 'deep_research'];
+
+const MODULE_FALLBACK = MODULE_ORDER.map((cid, i) => ({
+  id: `module_${i + 1}`,
+  category_id: cid,
+  category: (TASK_TYPE_META[cid] || TASK_TYPE_META.direct).title,
+  mode: cid === 'deep_research' ? 'deep' : 'fast',
+  question: '',
+  description: FEATURE_CARD_BRIEF[cid] || (FEATURE_HOVER_INTRO[cid] || '').slice(0, 48),
+}));
 
 // ==========================================
 // State
@@ -1479,6 +1495,8 @@ let cardState = new Map();
 // global last task_type drives right rail
 let activeTaskType = 'direct';
 let activeCardId = null;
+/** 用户点击 DB 澄清卡片后锁定场景，随下一条消息发送 */
+let pendingClarifyRoute = null;
 /** 最近一次完成的助手回答在服务端 chat_history 中的索引，供顶部「导出」无 cardId 时使用 */
 let lastReportHistoryIndex = null;
 const LAYOUT_PREF_KEY = 'cobot_layout_pref_v1';
@@ -1793,6 +1811,7 @@ async function loadExamples() {
     renderEmptyCards();
   } catch (e) {
     console.error('loadExamples failed', e);
+    renderEmptyCards();
   }
 }
 
@@ -1839,29 +1858,46 @@ function renderExamples() {
 
 function renderEmptyCards() {
   const root = document.getElementById('emptyCards');
-  if (!root || !exampleQuestions.length) return;
-  // Pick one example per category as a quick-start tile
-  const order = ['direct', 'kb_retrieval', 'station_device_td', 'alerting', 'troubleshooting', 'deep_research'];
+  if (!root) return;
+  const order = MODULE_ORDER;
   const seen = new Set();
   const picks = [];
-  for (const q of exampleQuestions) {
+  for (const q of exampleQuestions.length ? exampleQuestions : MODULE_FALLBACK) {
     if (seen.has(q.category_id) || !order.includes(q.category_id)) continue;
     seen.add(q.category_id);
     picks.push(q);
     if (picks.length >= 6) break;
   }
+  if (!picks.length) return;
   root.innerHTML = picks.map(q => {
     const meta = TASK_TYPE_META[q.category_id] || TASK_TYPE_META.direct;
     const intro = FEATURE_HOVER_INTRO[q.category_id] || q.description || q.question;
     const brief = FEATURE_CARD_BRIEF[q.category_id] || q.description || q.question;
+    const idx = exampleQuestions.indexOf(q);
+    const clickHandler = idx >= 0
+      ? `selectExample(${idx})`
+      : `enterModule('${q.category_id}')`;
     return `
-      <div class="empty-card" onclick="selectExample(${exampleQuestions.indexOf(q)})">
+      <div class="empty-card" onclick="${clickHandler}">
         <div class="empty-card-icon">${meta.icon}</div>
         <div class="empty-card-title">${esc(q.category)}</div>
         <div class="empty-card-desc">${esc(brief)}</div>
         <div class="empty-card-tooltip">${esc(intro)}</div>
       </div>`;
   }).join('');
+}
+
+function enterModule(categoryId) {
+  const meta = TASK_TYPE_META[categoryId] || TASK_TYPE_META.direct;
+  const sample = exampleQuestions.find(q => q.category_id === categoryId);
+  if (sample) {
+    selectExample(exampleQuestions.indexOf(sample));
+    return;
+  }
+  if (categoryId === 'deep_research') setMode('deep');
+  else setMode('fast');
+  document.getElementById('inputField').focus();
+  showToast(`已进入「${meta.title}」，请输入您的问题`);
 }
 
 function selectExample(i) {
@@ -2125,7 +2161,7 @@ function rerenderCard(cardId) {
     case 'station_device_td': bodyH = renderSqlChartCard(cs); break;
     case 'alerting':          bodyH = renderAlarmCard(cs); break;
     case 'troubleshooting':   bodyH = renderFaultDiagnosisCard(cs); break;
-    case 'deep_research':     bodyH = renderFaultDiagnosisCard(cs); break;
+    case 'deep_research':     bodyH = renderDeepResearchCard(cs); break;
     default:                bodyH = renderDirectCard(cs);
   }
   const footerH = `
@@ -2173,6 +2209,7 @@ function renderClarifyCandidates(cs) {
 }
 
 function selectClarifyCandidate(id, title, hint) {
+  pendingClarifyRoute = id;
   const f = document.getElementById('inputField');
   f.value = hint;
   updateCharCount();
@@ -2615,27 +2652,13 @@ function prettyAlarmCol(c) {
 function renderFaultDiagnosisCard(cs) {
   let conclusionH = '';
   if (cs.report && cs.report.trim()) {
-    const sec = parseSections(cs.report);
-    conclusionH = `
-      <div class="kb-conclusion" style="border-left-color:var(--purple);">
-        <div class="kb-conclusion-title" style="color:var(--purple);">🧠 诊断结论与推理</div>
-        <div class="md-body">${renderMd(sec.body || cs.report)}</div>
-      </div>`;
-    if (sec.analysis || sec.conclusion) {
-      conclusionH += `
-        <div class="split-2" style="margin-top:14px;">
-          ${sec.analysis ? `
-            <div class="bullet-card" style="border-left-color:var(--orange);">
-              <div class="bullet-card-title">🔬 推理过程</div>
-              <div class="md-body">${renderMd(sec.analysis)}</div>
-            </div>` : ''}
-          ${sec.conclusion ? `
-            <div class="bullet-card" style="border-left-color:var(--green);">
-              <div class="bullet-card-title">✅ 最终结论</div>
-              <div class="md-body">${renderMd(sec.conclusion)}</div>
-            </div>` : ''}
-        </div>`;
-    }
+    conclusionH = renderStructuredReportBody(cs.report, {
+      wrapperTitle: '🧠 诊断结论与推理',
+      analysisTitle: '🔬 推理过程',
+      conclusionTitle: '✅ 最终结论',
+      borderColor: 'var(--purple)',
+      titleColor: 'var(--purple)',
+    });
   } else {
     conclusionH = `<div class="thinking-ind">
       <div class="thinking-dots"><span></span><span></span><span></span></div>
@@ -2686,6 +2709,102 @@ function renderFaultDiagnosisCard(cs) {
   return `<div class="ai-card-body">${ctxH}${mcGridH}${conclusionH}</div>${evidenceH}${pipelineH}${clarifyH}`;
 }
 
+function renderDeepResearchCard(cs) {
+  let reportH = '';
+  if (cs.report && cs.report.trim()) {
+    reportH = `
+      <div class="kb-conclusion" style="border-left-color:var(--purple);">
+        <div class="kb-conclusion-title" style="color:var(--purple);">🧠 深度检索报告</div>
+        <div class="md-body">${renderMd(cs.report)}</div>
+      </div>`;
+  } else {
+    reportH = `<div class="thinking-ind">
+      <div class="thinking-dots"><span></span><span></span><span></span></div>
+      <span>多智能体深度推理进行中...</span>
+    </div>`;
+  }
+
+  let evidenceH = '';
+  const ev = cs.evidence_chunks || [];
+  if (ev.length) {
+    evidenceH = `
+      <div class="ai-card-section">
+        <div class="ai-card-section-title">
+          <span class="icon">🔎</span><span>检索证据 · 图文一体</span>
+          <span style="margin-left:auto;font-weight:500;color:var(--text-muted);font-size:11.5px;">命中 ${ev.length} 条</span>
+        </div>
+        <div class="kb-evidence-list">
+          ${ev.slice(0, 6).map(e => renderKbEvidenceItem(e)).join('')}
+        </div>
+      </div>`;
+  }
+
+  let pipelineH = '';
+  if (cs.steps && cs.steps.length) {
+    let total = 0;
+    pipelineH = `
+      <div class="ai-card-section">
+        <div class="ai-card-section-title"><span class="icon">⏱️</span><span>执行管线</span></div>
+        <div class="pipeline-mini">
+          ${cs.steps.map(s => {
+            const cls = s.status === 'completed' ? 'pl-completed' : (s.status === 'running' ? 'pl-running' : 'pl-pending');
+            const icon = s.status === 'completed' ? '✓' : (s.status === 'running' ? '◌' : '○');
+            const dur = s.duration ? s.duration.toFixed(1)+'s' : (s.status === 'running' ? '...' : '');
+            if (s.duration) total += s.duration;
+            return `<div class="pl-step ${cls}"><div class="pl-icon">${icon}</div><div class="pl-name">${NODE_NAMES[s.name]||s.name}</div><div class="pl-dur">${dur}</div></div>`;
+          }).join('')}
+          <div class="pl-step" style="border-top:1px solid var(--border-light);padding-top:8px;margin-top:4px;">
+            <div class="pl-icon" style="background:var(--primary);color:white;font-size:10px;">Σ</div>
+            <div class="pl-name" style="font-weight:700;">总耗时</div>
+            <div class="pl-dur" style="font-weight:700;color:var(--text-primary);">${total.toFixed(2)}s</div>
+          </div>
+        </div>
+      </div>`;
+  }
+  return `<div class="ai-card-body">${reportH}</div>${evidenceH}${pipelineH}`;
+}
+
+function renderStructuredReportBody(md, opts) {
+  const sec = parseSections(md);
+  const hasAnalysis = Boolean(sec.analysis && sec.analysis.trim());
+  const hasConclusion = Boolean(sec.conclusion && sec.conclusion.trim());
+  const hasSuggest = Boolean(sec.suggest && sec.suggest.trim());
+  const intro = (sec.body || '').trim();
+
+  if (hasAnalysis && hasConclusion) {
+    let html = intro ? `
+      <div class="kb-conclusion" style="border-left-color:${opts.borderColor};margin-bottom:14px;">
+        <div class="md-body">${renderMd(intro)}</div>
+      </div>` : '';
+    html += `
+      <div class="split-2">
+        <div class="bullet-card" style="border-left-color:var(--orange);">
+          <div class="bullet-card-title">${opts.analysisTitle}</div>
+          <div class="md-body">${renderMd(sec.analysis)}</div>
+        </div>
+        <div class="bullet-card" style="border-left-color:var(--green);">
+          <div class="bullet-card-title">${opts.conclusionTitle}</div>
+          <div class="md-body">${renderMd(sec.conclusion)}</div>
+        </div>
+      </div>`;
+    if (hasSuggest) {
+      html += `
+        <div class="bullet-card" style="margin-top:14px;border-left-color:var(--blue);">
+          <div class="bullet-card-title">💡 建议与关注</div>
+          <div class="md-body">${renderMd(sec.suggest)}</div>
+        </div>`;
+    }
+    return html;
+  }
+
+  const primary = hasConclusion ? sec.conclusion : (hasAnalysis ? sec.analysis : (hasSuggest ? sec.suggest : md));
+  return `
+    <div class="kb-conclusion" style="border-left-color:${opts.borderColor};">
+      <div class="kb-conclusion-title" style="color:${opts.titleColor};">${opts.wrapperTitle}</div>
+      <div class="md-body">${renderMd(intro ? intro + '\n\n' + primary : primary)}</div>
+    </div>`;
+}
+
 function toggleSqlTable(id) {
   const el = document.getElementById(id);
   const arrow = document.getElementById(id + '-arrow');
@@ -2705,17 +2824,18 @@ function extractFirstParagraph(md) {
 }
 
 function parseSections(md) {
-  // Heuristic: split markdown by H2 headings
+  // Heuristic: split markdown by H2/H3 headings; body = intro before first heading only
   if (!md) return { body: md };
-  const out = { body: md };
-  // Common patterns: 分析/结论/建议/推理
+  const out = {};
   const matches = [...md.matchAll(/^#{1,3}\s*(.+?)$/gm)];
-  if (!matches.length) return out;
+  if (!matches.length) return { body: md };
+  const intro = md.slice(0, matches[0].index).trim();
+  if (intro) out.body = intro;
   const slices = [];
   for (let i = 0; i < matches.length; i++) {
     const m = matches[i];
     const start = m.index + m[0].length;
-    const end = i + 1 < matches.length ? matches[i+1].index : md.length;
+    const end = i + 1 < matches.length ? matches[i + 1].index : md.length;
     slices.push({ title: m[1].trim(), body: md.slice(start, end).trim() });
   }
   for (const s of slices) {
@@ -2723,6 +2843,8 @@ function parseSections(md) {
     if (/分析|逐项|思路|推理|过程/.test(s.title)) out.analysis = (out.analysis ? out.analysis + '\n\n' : '') + s.body;
     else if (/结论|回答|总结|判定|断言/.test(s.title)) out.conclusion = (out.conclusion ? out.conclusion + '\n\n' : '') + s.body;
     else if (/建议|关注|action/.test(t)) out.suggest = s.body;
+    else if (!out.body) out.body = (out.body ? out.body + '\n\n' : '') + `## ${s.title}\n\n${s.body}`;
+    else out.body = (out.body ? out.body + '\n\n' : '') + `## ${s.title}\n\n${s.body}`;
   }
   return out;
 }
@@ -2771,13 +2893,18 @@ async function sendMessage() {
   renderLogs(logEntries);
   renderTimeline([]);
 
+  const payload = { message: text, mode: currentMode };
+  if (pendingClarifyRoute) payload.clarify_route = pendingClarifyRoute;
+  pendingClarifyRoute = null;
+
   try {
     const resp = await fetch('/api/chat', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ message: text, mode: currentMode }),
+      body: JSON.stringify(payload),
     });
     const data = await resp.json();
     if (data.status === 'busy') {
+      if (payload.clarify_route) pendingClarifyRoute = payload.clarify_route;
       alert(data.message);
       isRunning = false; document.getElementById('sendBtn').disabled = false;
       return;
@@ -2785,6 +2912,7 @@ async function sendMessage() {
     startSSE(cardId);
   } catch (err) {
     console.error(err);
+    if (payload && payload.clarify_route) pendingClarifyRoute = payload.clarify_route;
     isRunning = false; document.getElementById('sendBtn').disabled = false;
   }
 }
@@ -2923,7 +3051,7 @@ async function downloadReportPdf(cardId) {
     return showToast('暂无可下载的 PDF 报告');
   }
 
-  const pdfTitle = `Report_${new Date().toISOString().replace(/[-:.]/g, '').slice(0,15)}`;
+  const pdfTitle = `Report_${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}`;
   const wrapper = document.createElement('div');
   wrapper.style.position = 'fixed';
   wrapper.style.left = '-9999px';
@@ -2940,11 +3068,12 @@ async function downloadReportPdf(cardId) {
         <h1 style="font-size: 28px; margin: 0 0 8px; color: #0F6EA0;">分析报告</h1>
         <div style="font-size: 13px; color: #5B6E7F;">生成时间：${new Date().toLocaleString()}</div>
       </div>
-      ${chartUrl ? `<div style="margin: 18px 0; text-align: center;"><img src="${chartUrl}" style="max-width: 100%; height: auto; border-radius: 10px; border: 1px solid #E8F2F8;" /></div>` : ''}
+      ${chartUrl ? `<div style="margin: 18px 0; text-align: center;"><img src="${escAttr(chartUrl)}" style="max-width: 100%; height: auto; border-radius: 10px; border: 1px solid #E8F2F8;" /></div>` : ''}
       <div class="md-body">${renderMd(reportText)}</div>
     </div>
   `;
   document.body.appendChild(wrapper);
+  renderMathSafely(wrapper);
 
   try {
     const canvas = await html2canvas(wrapper, {
@@ -2977,6 +3106,7 @@ async function downloadReportPdf(cardId) {
     document.body.removeChild(wrapper);
   }
 }
+
 async function resetChat() {
   if (isRunning) { showToast('请等待当前分析完成后再重置。'); return; }
   if (!confirm('确定要重置对话吗？所有上下文将清空。')) return;
