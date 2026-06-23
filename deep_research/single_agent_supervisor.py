@@ -243,7 +243,7 @@ async def single_supervisor_node(state: AgentState):
     print("--- Executing Node: Supervisor (Intent Routing) ---", flush=True)
     
     user_req = state.get("user_request", "")
-    tot_plan = state.get("current_tot", "暂无前置规划，请根据当前问题进行自主决策")
+    tot_plan = state.get("current_tot",0) or "暂无前置规划，请根据当前问题进行自主决策"
 
     history_str = _get_recent_history_str(state, k=5, max_chars=1500)
     prev_cases = state.get("pre_brief_cases", "") or ""

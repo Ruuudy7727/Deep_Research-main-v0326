@@ -12,6 +12,7 @@ fintune/
 # Local runtime
 dbdata/
 log/
+eval_outputs/
 
 # Python
 __pycache__/
