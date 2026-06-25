@@ -9,12 +9,16 @@ import json
 import os
 import random
 import re
+import sys
 import urllib.request
 from pathlib import Path
 from statistics import mean
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 PAIRS = {
     "wo_routing": "routing",
     "wo_bm25": "retrieval",

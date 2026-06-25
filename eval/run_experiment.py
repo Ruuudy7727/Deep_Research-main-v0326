@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
 import time
 import urllib.parse
 import urllib.request
@@ -12,6 +13,9 @@ from pathlib import Path
 from typing import Any, Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 DATASET = ROOT / "eval" / "datasets" / "v2_ablation_40.jsonl"
 VARIANT_SUBSETS = {
     "full": {"routing", "sql", "retrieval", "deep"},
