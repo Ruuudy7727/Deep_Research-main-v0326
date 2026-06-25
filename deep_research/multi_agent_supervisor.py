@@ -303,6 +303,15 @@ async def supervisor_tools(state: SupervisorState) -> Command[Literal["superviso
 
             # 2. Conduct Research
             if conduct_research_calls:
+                try:
+                    from deep_research.ablation_config import update_ablation_trace
+
+                    update_ablation_trace(
+                        researcher_call_count_increment=len(conduct_research_calls),
+                        executed_node="ConductResearch",
+                    )
+                except Exception:
+                    pass
                 coros = []
                 for tc in conduct_research_calls:
                     args = tc.get("args") or {}

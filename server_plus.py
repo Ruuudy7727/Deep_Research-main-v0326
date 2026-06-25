@@ -1959,8 +1959,6 @@ async def background_graph_runner(
             graph_ev_run_id = event.get("run_id")
             if kind == "on_chain_start" and name:
                 update_ablation_trace(executed_node=str(name))
-                if "researcher" in str(name).lower():
-                    update_ablation_trace(researcher_call_count_increment=1)
 
             if run_sess:
                 if run_sess.log_profile == "full":

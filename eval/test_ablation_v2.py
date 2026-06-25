@@ -105,6 +105,18 @@ class RunnerTests(unittest.TestCase):
             old = json.loads(path.read_text(encoding="utf-8"))
             self.assertNotEqual(old["service_status"]["config_fingerprint"], "def")
 
+    def test_rerun_subset_filter(self):
+        existing = {
+            "route_001": {"id": "route_001", "subset": "routing"},
+            "deep_001": {"id": "deep_001", "subset": "deep"},
+        }
+        filtered = {
+            row_id: row
+            for row_id, row in existing.items()
+            if row.get("subset") != "deep"
+        }
+        self.assertEqual(set(filtered), {"route_001"})
+
     def test_trace_validation(self):
         good = [{
             "id": "x",
@@ -124,6 +136,30 @@ class RunnerTests(unittest.TestCase):
         }]
         self.assertEqual(self.analyzer.validate_trace("wo_images", good), [])
         self.assertTrue(self.analyzer.validate_trace("wo_images", bad))
+
+    def test_strict_image_and_multi_agent_validation(self):
+        image_bad = [{
+            "id": "image_x",
+            "status": "done",
+            "kb_images": [],
+            "evidence_chunks": [{"image_paths": ["x.png"]}],
+            "ablation_trace": {
+                "variant": "wo_images",
+                "retrieved_image_count": 0,
+                "injected_image_count": 0,
+            },
+        }]
+        multi_bad = [{
+            "id": "multi_x",
+            "status": "done",
+            "ablation_trace": {
+                "variant": "wo_multi_agent",
+                "researcher_call_count": 0,
+                "executed_nodes": ["supervisor_subgraph"],
+            },
+        }]
+        self.assertTrue(self.analyzer.validate_trace("wo_images", image_bad))
+        self.assertTrue(self.analyzer.validate_trace("wo_multi_agent", multi_bad))
 
 
 if __name__ == "__main__":

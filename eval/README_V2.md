@@ -37,6 +37,16 @@ python eval/run_experiment.py `
 
 Repeat for all variants. Add `--limit 1` for a smoke test.
 
+To refresh only one subset after a tracing or service fix:
+
+```powershell
+python eval/run_experiment.py `
+  --base-url https://aiops-pre.szclou.com:50221 `
+  --experiment-id paper_v2 `
+  --variant full `
+  --rerun-subset deep
+```
+
 Analyze completed runs:
 
 ```powershell

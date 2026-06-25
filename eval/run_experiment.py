@@ -176,6 +176,11 @@ def main() -> int:
     parser.add_argument("--stream-timeout", type=float, default=1200)
     parser.add_argument("--allow-commit-mismatch", action="store_true")
     parser.add_argument("--limit", type=int)
+    parser.add_argument(
+        "--rerun-subset",
+        choices=["routing", "sql", "retrieval", "deep"],
+        help="Discard completed rows from this subset and run them again.",
+    )
     args = parser.parse_args()
 
     from deep_research.ablation_config import AblationConfig
@@ -219,6 +224,12 @@ def main() -> int:
             if line.strip():
                 row = json.loads(line)
                 existing[row["id"]] = row
+    if args.rerun_subset:
+        existing = {
+            row_id: row
+            for row_id, row in existing.items()
+            if row.get("subset") != args.rerun_subset
+        }
 
     rows = load_dataset(args.variant)
     if args.limit:

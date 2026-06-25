@@ -126,10 +126,23 @@ def validate_trace(variant: str, rows: list[dict[str, Any]]) -> list[str]:
             errors.append(f"{row['id']}: BM25 was called")
         if variant == "wo_images" and int(trace.get("injected_image_count") or 0) != 0:
             errors.append(f"{row['id']}: image was injected")
+        if variant == "wo_images" and int(trace.get("retrieved_image_count") or 0) != 0:
+            errors.append(f"{row['id']}: image metadata reached shared state")
+        if variant == "wo_images" and row.get("kb_images"):
+            errors.append(f"{row['id']}: kb_images is not empty")
+        if variant == "wo_images":
+            for chunk in row.get("evidence_chunks") or []:
+                if not isinstance(chunk, dict):
+                    continue
+                if chunk.get("image_paths") or chunk.get("image_urls") or chunk.get("images"):
+                    errors.append(f"{row['id']}: image metadata remains in evidence chunks")
+                    break
         if variant == "wo_schema" and int(trace.get("sanitizer_call_count") or 0) != 0:
             errors.append(f"{row['id']}: sanitizer was called")
         if variant == "wo_multi_agent" and int(trace.get("researcher_call_count") or 0) != 0:
             errors.append(f"{row['id']}: researcher was called")
+        if variant == "wo_multi_agent" and "supervisor_subgraph" in (trace.get("executed_nodes") or []):
+            errors.append(f"{row['id']}: supervisor_subgraph was executed")
         if variant == "wo_routing" and trace.get("execution_path") != "deep":
             errors.append(f"{row['id']}: execution path was not deep")
     return errors
@@ -228,6 +241,23 @@ def main() -> int:
             validation[variant].append(
                 f"paired IDs mismatch: missing={sorted(expected-observed)}, extra={sorted(observed-expected)}"
             )
+    full_deep = [r for r in data["full"] if r.get("subset") == "deep" and r.get("status") == "done"]
+    required_image_full = [r for r in full_deep if r.get("requires_image")]
+    if data["wo_images"] and required_image_full and not any(
+        int((r.get("ablation_trace") or {}).get("injected_image_count") or 0) > 0
+        for r in required_image_full
+    ):
+        validation["wo_images"].append(
+            "full baseline injected no image on any requires_image sample; image contribution is not measurable"
+        )
+    if data["wo_multi_agent"] and full_deep and not any(
+        int((r.get("ablation_trace") or {}).get("researcher_call_count") or 0) > 0
+        or "ConductResearch" in ((r.get("ablation_trace") or {}).get("executed_nodes") or [])
+        for r in full_deep
+    ):
+        validation["wo_multi_agent"].append(
+            "full baseline has no verified ConductResearch dispatch; multi-agent contribution is not measurable"
+        )
 
     metrics = {variant: row_metrics(rows) for variant, rows in data.items() if rows}
     paired_metrics: dict[str, Any] = {}
