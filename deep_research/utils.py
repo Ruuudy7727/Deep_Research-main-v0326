@@ -534,6 +534,22 @@ def _build_bm25_from_chroma_sync(chroma_vs: "Chroma", is_plan: bool = False):
     """从指定 Chroma 构建 BM25 索引。is_plan=True 时写入 plan 变量。"""
     global bm25_index, bm25_docs, bm25_doc_ids, bm25_ready
     global bm25_index_plan, bm25_docs_plan, bm25_doc_ids_plan, bm25_ready_plan
+    try:
+        from deep_research.ablation_config import get_ablation_config
+        if get_ablation_config().disable_bm25:
+            if is_plan:
+                bm25_index_plan = None
+                bm25_docs_plan.clear()
+                bm25_doc_ids_plan.clear()
+                bm25_ready_plan = False
+            else:
+                bm25_index = None
+                bm25_docs.clear()
+                bm25_doc_ids.clear()
+                bm25_ready = False
+            return
+    except Exception:
+        pass
 
     if not RETRIEVAL_DEPS_OK or not BM25Okapi:
         print("⚠️ [BM25] 依赖缺失或不可用，跳过BM25索引构建。")
@@ -623,6 +639,11 @@ async def _lc_retrieve_hybrid_async(query: str, vectordb: "Chroma", top_k: int, 
         emb_docs_map[did] = doc
         emb_scores_raw[did] = 1.0 - float(dist)
     emb_scores_norm = minmax_norm(emb_scores_raw)
+    try:
+        from deep_research.ablation_config import update_ablation_trace
+        update_ablation_trace(dense_candidate_count_increment=len(emb_scores_norm))
+    except Exception:
+        pass
 
     if is_plan:
         bm_ready = bm25_ready_plan
@@ -637,6 +658,11 @@ async def _lc_retrieve_hybrid_async(query: str, vectordb: "Chroma", top_k: int, 
 
     bm25_scores_raw = {}
     if bm_ready and bm_index:
+        try:
+            from deep_research.ablation_config import update_ablation_trace
+            update_ablation_trace(bm25_call_count_increment=1)
+        except Exception:
+            pass
         q_tokens = zh_tokenize(query)
         all_scores = bm_index.get_scores(q_tokens)
         top_n_indices = sorted(enumerate(all_scores), key=lambda x: x[1], reverse=True)[:top_k*5]
@@ -644,6 +670,10 @@ async def _lc_retrieve_hybrid_async(query: str, vectordb: "Chroma", top_k: int, 
             if score > 0 and idx < len(bm_ids):
                 bm25_scores_raw[bm_ids[idx]] = float(score)
     bm25_scores_norm = minmax_norm(bm25_scores_raw)
+    try:
+        update_ablation_trace(bm25_candidate_count_increment=len(bm25_scores_norm))
+    except Exception:
+        pass
 
     all_ids = set(emb_scores_norm.keys()) | set(bm25_scores_norm.keys())
     fused_list = []
@@ -661,6 +691,13 @@ async def _lc_retrieve_hybrid_async(query: str, vectordb: "Chroma", top_k: int, 
     sources = []
     for s, d in final_items:
         base_meta = dict((d.metadata or {}))
+        try:
+            from deep_research.ablation_config import get_ablation_config
+            if get_ablation_config().disable_image_metadata:
+                for key in ("image_paths", "images", "image_path"):
+                    base_meta.pop(key, None)
+        except Exception:
+            pass
         # 保留底层检索返回的完整 metadata（尤其 image_paths/file_path/full_doc_id），
         # 只覆盖统一字段，避免上游链路丢失图文证据关联。
         base_meta["source"] = base_meta.get("source", "?")
@@ -681,7 +718,11 @@ def initialize_all_retrievers() -> None:
     global vectordb_instance, vectordb_plan_instance, bm25_ready
 
     # 1. 单例检查：如果主库已经加载，直接跳过
-    if vectordb_instance is not None and bm25_ready:
+    try:
+        bm25_not_required = get_ablation_config().disable_bm25
+    except Exception:
+        bm25_not_required = False
+    if vectordb_instance is not None and (bm25_ready or bm25_not_required):
         # print("⚡ [RAG] 检索器已在内存中，跳过重复初始化。") 
         return
 

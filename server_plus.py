@@ -25,6 +25,7 @@ import mimetypes
 import re
 import tempfile
 import html as html_module
+import subprocess
 from urllib.parse import urlparse
 
 try:
@@ -35,6 +36,12 @@ from typing import List, Dict, Any, Tuple, Optional
 from pathlib import Path
 
 from deep_research.run_logging import apply_runtime_logging_defaults, maybe_create_web_run_session
+from deep_research.ablation_config import (
+    get_ablation_config,
+    get_ablation_trace,
+    reset_ablation_trace,
+    update_ablation_trace,
+)
 
 from fastapi import FastAPI, Request, File, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse, Response, JSONResponse
@@ -118,6 +125,7 @@ SHARED_STATE: Dict[str, Any] = {
     "run_session": None,
     "current_run_id": None,
     "current_run_dir": None,
+    "ablation_trace": {},
 }
 
 MEMORY = MemorySaver()
@@ -127,6 +135,24 @@ CURRENT_THREAD_ID = f"web_{int(time.time())}"
 # 1. 环境配置
 # ==========================================
 load_dotenv(dotenv_path=str(PROJECT_ROOT / ".env"), override=False)
+ABLATION_CONFIG = get_ablation_config()
+SERVICE_STARTED_AT = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def _git_commit() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=PROJECT_ROOT,
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+        ).strip()
+    except Exception:
+        return "unknown"
+
+
+SERVICE_GIT_COMMIT = _git_commit()
 
 os.environ["MIDEA_API_KEY"] = os.getenv("MIDEA_API_KEY", "")
 MIDEA_API_KEY = os.environ["MIDEA_API_KEY"]
@@ -1056,6 +1082,7 @@ def _install_rag_image_capture_patch() -> None:
 
             def _wrapped_vss(q, k=4, **kw):
                 key = (str(q), int(k))
+                images_disabled = get_ablation_config().disable_image_metadata
                 cached = getattr(vectordb, "_vss_last_call", None)
                 if cached and cached[0] == key:
                     return cached[1]
@@ -1080,9 +1107,14 @@ def _install_rag_image_capture_patch() -> None:
                     meta_by_content[doc.page_content] = dict(doc.metadata or {})
                 for item in results:
                     extra = meta_by_content.get(item.get("content"), {})
+                    base_meta = item.get("metadata") or {}
+                    if images_disabled:
+                        for key in ("image_paths", "images", "image_path"):
+                            base_meta.pop(key, None)
+                        item["metadata"] = base_meta
+                        continue
                     if not extra:
                         continue
-                    base_meta = item.get("metadata") or {}
                     for key in ("image_paths", "file_path", "full_doc_id", "_id", "tokens"):
                         if extra.get(key) is not None and key not in base_meta:
                             base_meta[key] = extra.get(key)
@@ -1825,6 +1857,7 @@ async def background_graph_runner(
     run_sess = SHARED_STATE.get("run_session")
     try:
         SHARED_STATE["is_running"] = True
+        update_ablation_trace(execution_path="deep" if deep_mode else "fast")
         SHARED_STATE["_answer_run_start_perf"] = time.perf_counter()
         mode_label = "Deep Research" if deep_mode else "Fast"
         SHARED_STATE["logs"].append(f"[Start - {mode_label}] {datetime.datetime.now().strftime('%H:%M:%S')}\n")
@@ -1924,6 +1957,10 @@ async def background_graph_runner(
         async for event in graph.astream_events(inputs, config=config, version="v1"):
             kind, name, data = event.get("event"), event.get("name"), event.get("data", {})
             graph_ev_run_id = event.get("run_id")
+            if kind == "on_chain_start" and name:
+                update_ablation_trace(executed_node=str(name))
+                if "researcher" in str(name).lower():
+                    update_ablation_trace(researcher_call_count_increment=1)
 
             if run_sess:
                 if run_sess.log_profile == "full":
@@ -2144,6 +2181,10 @@ async def background_graph_runner(
             )
             run_sess.main_line(f"EXCEPTION: {type(e).__name__}: {e}")
     finally:
+        trace = get_ablation_trace()
+        trace["retrieved_image_count"] = len(SHARED_STATE.get("retrieved_images") or [])
+        trace["injected_image_count"] = len(SHARED_STATE.get("answer_images") or [])
+        SHARED_STATE["ablation_trace"] = trace
         start_perf = SHARED_STATE.pop("_answer_run_start_perf", None)
         if start_perf is not None:
             elapsed = time.perf_counter() - start_perf
@@ -2188,6 +2229,27 @@ async def background_graph_runner(
 # 3. FastAPI 应用
 # ==========================================
 app = FastAPI(title="科宝 Cobot")
+
+
+@app.get("/api/eval/status")
+async def api_eval_status():
+    cfg = get_ablation_config()
+    return {
+        "service": "server_plus",
+        "protocol_version": 2,
+        "variant": cfg.variant_name,
+        "config": cfg.public_dict(),
+        "config_fingerprint": cfg.fingerprint,
+        "git_commit": SERVICE_GIT_COMMIT,
+        "started_at": SERVICE_STARTED_AT,
+        "capabilities": {
+            "bm25_enabled": not cfg.disable_bm25,
+            "schema_pipeline": "direct_text2sql" if cfg.disable_schema_constraint else "plan_sanitize_build",
+            "image_metadata_enabled": not cfg.disable_image_metadata,
+            "multi_agent_enabled": not cfg.disable_multi_agent,
+            "routing_mode": "always_deep" if cfg.force_always_deep else "adaptive",
+        },
+    }
 
 os.makedirs(PROJECT_ROOT / "figure", exist_ok=True)
 os.makedirs(PROJECT_ROOT / "reports", exist_ok=True)
@@ -2306,6 +2368,8 @@ async def api_chat(req: ChatRequest):
     SHARED_STATE["run_session"] = None
     SHARED_STATE["current_run_id"] = None
     SHARED_STATE["current_run_dir"] = None
+    reset_ablation_trace()
+    SHARED_STATE["ablation_trace"] = get_ablation_trace()
 
     _sess = maybe_create_web_run_session(
         PROJECT_ROOT,
@@ -2342,6 +2406,8 @@ async def api_chat(req: ChatRequest):
         "mode": req.mode,
         "run_id": SHARED_STATE.get("current_run_id"),
         "run_dir": SHARED_STATE.get("current_run_dir"),
+        "variant": ABLATION_CONFIG.variant_name,
+        "config_fingerprint": ABLATION_CONFIG.fingerprint,
     }
 
 
@@ -2424,6 +2490,7 @@ async def api_stream():
                     "clarify_candidates": clarify_candidates,
                     # --- Plus v3: 指标卡片（设备/时间上下文 + 按表聚合指标） ---
                     "metric_cards": metric_cards,
+                    "ablation_trace": get_ablation_trace(),
                 }
                 yield f"event: state\ndata: {json.dumps(state_payload, ensure_ascii=False, default=str)}\n\n"
 
@@ -2451,6 +2518,7 @@ async def api_stream():
                     "clarify_candidates": SHARED_STATE.get("clarify_candidates") or [],
                     "metric_cards": SHARED_STATE.get("metric_cards") or {},
                     "answer_elapsed_seconds": SHARED_STATE.get("last_answer_elapsed_seconds"),
+                    "ablation_trace": SHARED_STATE.get("ablation_trace") or get_ablation_trace(),
                 }
                 _dbg_stream(
                     "api_stream final_state "

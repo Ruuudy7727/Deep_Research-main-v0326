@@ -134,9 +134,7 @@ _bm25_ready: bool = False
 try:
     from deep_research.ablation_config import get_ablation_config
 
-    _BM25_ALPHA = get_ablation_config().bm25_alpha if get_ablation_config().bm25_alpha else 0.5
-    if get_ablation_config().disable_bm25:
-        _BM25_ALPHA = 0.0
+    _BM25_ALPHA = get_ablation_config().bm25_alpha
 except Exception:
     _BM25_ALPHA = 0.5
 _FINAL_TOP_K = 3
@@ -243,6 +241,16 @@ def _build_bm25(vs: "Chroma") -> None:
     从 Chroma 中读取所有文档，构建 BM25。若不可用则安全跳过。
     """
     global _bm25_index, _bm25_docs, _bm25_doc_ids, _bm25_ready
+    try:
+        from deep_research.ablation_config import get_ablation_config
+        if get_ablation_config().disable_bm25:
+            _bm25_index = None
+            _bm25_docs = []
+            _bm25_doc_ids = []
+            _bm25_ready = False
+            return
+    except Exception:
+        pass
     _bm25_index = None
     _bm25_docs = []
     _bm25_doc_ids = []
@@ -341,6 +349,11 @@ def _retrieve_hybrid_sync(query: str, top_k: int) -> List[Dict[str, Any]]:
             emb_docs_map[did] = doc
             emb_scores_raw[did] = 1.0 - float(dist)  # 距离->相似度
         emb_scores = minmax_norm(emb_scores_raw)
+        try:
+            from deep_research.ablation_config import update_ablation_trace
+            update_ablation_trace(dense_candidate_count_increment=len(emb_scores))
+        except Exception:
+            pass
     except Exception as e:
         print(f"⚠️ [local_db] 向量检索失败：{e}")
         emb_scores, emb_docs_map = {}, {}
@@ -349,6 +362,8 @@ def _retrieve_hybrid_sync(query: str, top_k: int) -> List[Dict[str, Any]]:
     bm25_scores = {}
     if _bm25_ready and _bm25_index is not None:
         try:
+            from deep_research.ablation_config import update_ablation_trace
+            update_ablation_trace(bm25_call_count_increment=1)
             q_tokens = zh_tokenize(query)
             all_scores = _bm25_index.get_scores(q_tokens)
             idx_scores = sorted(enumerate(all_scores), key=lambda x: x[1], reverse=True)[:max(1, top_k * 5)]
@@ -356,6 +371,7 @@ def _retrieve_hybrid_sync(query: str, top_k: int) -> List[Dict[str, Any]]:
                 if sc > 0 and idx < len(_bm25_doc_ids):
                     bm25_scores[_bm25_doc_ids[idx]] = float(sc)
             bm25_scores = minmax_norm(bm25_scores)
+            update_ablation_trace(bm25_candidate_count_increment=len(bm25_scores))
         except Exception as e:
             print(f"⚠️ [local_db] BM25 检索失败：{e}")
             bm25_scores = {}
@@ -374,6 +390,13 @@ def _retrieve_hybrid_sync(query: str, top_k: int) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for s, d in fused_sorted:
         meta = dict(d.metadata or {})
+        try:
+            from deep_research.ablation_config import get_ablation_config
+            if get_ablation_config().disable_image_metadata:
+                for key in ("image_paths", "images", "image_path"):
+                    meta.pop(key, None)
+        except Exception:
+            pass
         # 保留原 metadata（含 image_paths 等图文关联字段），只统一关键展示字段。
         meta["source"] = meta.get("source") or meta.get("path") or meta.get("file") or "local"
         meta["title"] = meta.get("title") or os.path.basename(str(meta.get("source") or "")) or "local"

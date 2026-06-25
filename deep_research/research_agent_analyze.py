@@ -640,6 +640,11 @@ def _write_db_chain_log(state: Optional[AgentState], event: Dict[str, Any]) -> N
 
 
 def _sanitize_plan(plan: Dict[str, Any], route: str) -> Dict[str, Any]:
+    try:
+        from deep_research.ablation_config import update_ablation_trace
+        update_ablation_trace(sanitizer_call_count_increment=1)
+    except Exception:
+        pass
     warnings: List[str] = []
     raw_table = str(plan.get("table", "")).strip()
     table_name = _resolve_table_name(raw_table)
@@ -1353,6 +1358,9 @@ async def _execute_direct_text2sql(
         if not isinstance(sql, str) or not sql.strip():
             continue
         sql_clean = sql.strip().rstrip(";")
+        if not re.match(r"(?is)^\s*select\b", sql_clean):
+            all_rows.append({"error": "Direct Text-to-SQL ablation only permits SELECT.", "sql": sql_clean})
+            continue
         executed_sqls.append(sql_clean)
         use_td = bool(route == "station_device_td" and getTdSqlData is not None)
         try:
