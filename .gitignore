@@ -45,5 +45,9 @@ deep_research.zip
 .gradio/
 .npm-cache/
 
+# Obsidian local vault config
+.obsidian/
+Git同步操作与坑点_Obsidian.md
+
 # uv (optional lock can stay tracked — keep lock; ignore cache if present)
 .uv/

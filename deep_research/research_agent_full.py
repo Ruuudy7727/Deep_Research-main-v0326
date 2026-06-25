@@ -399,8 +399,17 @@ def deep_researcher_builder(llm: RunnableLambda = None, checkpointer=None):
     )
     builder.add_edge("pre_brief_retrieval", "write_draft_report")
     # Complex Path 继续
-    builder.add_edge("write_draft_report", "supervisor_subgraph")
-    builder.add_edge("supervisor_subgraph", "final_report_generation")
+    try:
+        from deep_research.ablation_config import get_ablation_config
+
+        if get_ablation_config().disable_multi_agent:
+            builder.add_edge("write_draft_report", "final_report_generation")
+        else:
+            builder.add_edge("write_draft_report", "supervisor_subgraph")
+            builder.add_edge("supervisor_subgraph", "final_report_generation")
+    except Exception:
+        builder.add_edge("write_draft_report", "supervisor_subgraph")
+        builder.add_edge("supervisor_subgraph", "final_report_generation")
     
     # 4. [修改] 将原本的结束点重定向到 update_history
     # 无论是 Complex 路径的终点 (final_report_generation)

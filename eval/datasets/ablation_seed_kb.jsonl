@@ -1,0 +1,2 @@
+{"id":"kb_001","category":"kb_retrieval","question":"电芯失效分析流程是怎样的？","mode":"fast","gold_task_type":"kb_retrieval","gold_action":"RETRIEVE","notes":"Failure-analysis flow with diagram evidence."}
+{"id":"kb_002","category":"kb_retrieval","question":"热解粒子传感器试验设备介绍","mode":"fast","gold_task_type":"kb_retrieval","gold_action":"RETRIEVE","notes":"Conceptual KB query."}

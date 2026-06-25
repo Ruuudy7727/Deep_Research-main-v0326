@@ -1278,6 +1278,119 @@ def _server_now_injection_text() -> str:
     )
 
 
+db_direct_text2sql_prompt = """
+你是 Text-to-SQL 助手。根据用户问题和数据库 schema，直接输出可执行的 SQL 语句。
+
+[当前参考时刻]
+{server_now}
+
+[可用表 schema — JSON]
+{schema_json}
+
+[规则]
+1. 只输出 JSON：{{"sqls": ["SELECT ...", ...]}}，不要 markdown。
+2. 只能使用 schema 中出现的表名和字段名。
+3. 告警表 alarm_event 的时间字段为 start_time / end_time。
+4. 每条 SQL 必须可独立执行；复杂问题可输出多条 SQL。
+
+用户问题：
+{user_req}
+"""
+
+
+def _schema_summary_for_direct_sql() -> Dict[str, Any]:
+    summary: Dict[str, Any] = {}
+    for table, schema in TABLE_SCHEMAS.items():
+        summary[table] = {
+            "fields": sorted(list(schema.get("fields", []))),
+            "time_fields": list(schema.get("time_fields", [])),
+        }
+    return summary
+
+
+async def _execute_direct_text2sql(
+    user_req: str,
+    route: str,
+    *,
+    state: Optional[AgentState] = None,
+    db_llm_traces: Optional[Dict[str, Any]] = None,
+    emit_chain_event=None,
+) -> Dict[str, Any]:
+    """Ablation path: LLM emits raw SQL without plan/sanitize/build pipeline."""
+    traces = db_llm_traces if db_llm_traces is not None else {}
+    server_now_ctx = _server_now_injection_text()
+    prompt = (
+        db_direct_text2sql_prompt.replace("{server_now}", server_now_ctx)
+        .replace("{schema_json}", json.dumps(_schema_summary_for_direct_sql(), ensure_ascii=False))
+        .replace("{user_req}", str(user_req))
+    )
+    raw_text = ""
+    try:
+        parsed, raw_text = await _invoke_json_llm_with_raw(prompt)
+        traces["direct_text2sql"] = {"raw_response": raw_text, "parsed": parsed}
+        if emit_chain_event:
+            emit_chain_event("direct_text2sql", route=route, parsed=parsed, raw_response=_clip_for_log(raw_text))
+    except Exception as exc:
+        traces["direct_text2sql"] = {"error": str(exc), "partial_raw": raw_text}
+        return {
+            "raw_db_results": [{"error": f"Direct Text-to-SQL failed: {exc}"}],
+            "db_route": route,
+            "db_llm_traces": traces,
+        }
+
+    sqls = parsed.get("sqls") if isinstance(parsed, dict) else []
+    if not isinstance(sqls, list) or not sqls:
+        return {
+            "raw_db_results": [{"error": "Direct Text-to-SQL returned empty sqls."}],
+            "db_route": route,
+            "db_llm_traces": traces,
+        }
+
+    executed_sqls: List[str] = []
+    all_rows: List[Dict[str, Any]] = []
+    per_table: Dict[str, List[Dict[str, Any]]] = {}
+    for sql in sqls:
+        if not isinstance(sql, str) or not sql.strip():
+            continue
+        sql_clean = sql.strip().rstrip(";")
+        executed_sqls.append(sql_clean)
+        use_td = bool(route == "station_device_td" and getTdSqlData is not None)
+        try:
+            if use_td:
+                rows = await asyncio.to_thread(getTdSqlData, sql_clean)
+            else:
+                rows = await asyncio.to_thread(getMySqlData, sql_clean)
+        except Exception as exc:
+            all_rows.append({"error": str(exc), "sql": sql_clean})
+            continue
+        if isinstance(rows, list):
+            all_rows.extend(rows)
+            tables = extract_tables_from_sql([sql_clean])
+            table_name = tables[0] if tables else "unknown"
+            per_table.setdefault(table_name, []).extend(rows)
+
+    return {
+        "raw_db_results": all_rows,
+        "executed_sqls": executed_sqls,
+        "db_route": route,
+        "db_query_params": {"direct_text2sql": True, "route": route},
+        "db_llm_traces": traces,
+        "db_table_results": per_table,
+    }
+
+
+def extract_tables_from_sql(sqls: List[str]) -> List[str]:
+    tables: List[str] = []
+    for sql in sqls:
+        tokens = str(sql).replace("\n", " ").split()
+        for idx, tok in enumerate(tokens[:-1]):
+            if tok.lower() in {"from", "join"}:
+                table = tokens[idx + 1].strip("`\"[],;")
+                if table and table not in tables:
+                    tables.append(table)
+    return tables
+
+
 async def retrieve_battery_node(state: AgentState):
     print("--- Executing Node: retrieve_battery_node ---", flush=True)
     user_req = state.get("user_request", "")
@@ -1427,6 +1540,27 @@ async def retrieve_battery_node(state: AgentState):
         }
 
     route_json["device_scope"] = _merge_scope(route_json.get("device_scope", {}), supervisor_params)
+
+    try:
+        from deep_research.ablation_config import get_ablation_config
+
+        if get_ablation_config().disable_schema_constraint:
+            direct_result = await _execute_direct_text2sql(
+                str(user_req),
+                route,
+                state=state,
+                db_llm_traces=db_llm_traces,
+                emit_chain_event=emit_chain_event,
+            )
+            direct_result["db_evidence_bundle"] = {
+                "route_used": route,
+                "diagnosis_conclusion": "Direct Text-to-SQL ablation path executed.",
+                "evidence_sufficiency": "partial",
+                "confidence": round(confidence, 3),
+            }
+            return direct_result
+    except Exception as ablation_exc:
+        emit_chain_event("direct_text2sql_ablation_error", error=str(ablation_exc))
 
     raw_planner_text = ""
     try:

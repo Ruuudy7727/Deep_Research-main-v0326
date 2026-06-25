@@ -1099,6 +1099,10 @@ def _install_rag_image_capture_patch() -> None:
         async def _patched_unified(query: str, top_k: int = 3, **kwargs):
             results = await original_unified(query, top_k=top_k, **kwargs)
             try:
+                from deep_research.ablation_config import get_ablation_config
+
+                if get_ablation_config().disable_image_metadata:
+                    return results
                 added_img = _record_retrieved_images_from_results(results or [])
                 added_chunks = _record_evidence_chunks_from_results(query, results or [])
                 if added_img or added_chunks:
@@ -1121,6 +1125,10 @@ def _install_rag_image_capture_patch() -> None:
             def _patched_sync(query: str, top_k: int = 3, **kwargs):
                 results = original_sync(query, top_k=top_k, **kwargs)
                 try:
+                    from deep_research.ablation_config import get_ablation_config
+
+                    if get_ablation_config().disable_image_metadata:
+                        return results
                     added_img = _record_retrieved_images_from_results(results or [])
                     added_chunks = _record_evidence_chunks_from_results(query, results or [])
                     if added_img or added_chunks:
@@ -2312,6 +2320,13 @@ async def api_chat(req: ChatRequest):
 
     prior_turns = _build_prior_turns(SHARED_STATE["chat_history"], max_pairs=5)
     deep_mode = req.mode == "deep"
+    try:
+        from deep_research.ablation_config import get_ablation_config
+
+        if get_ablation_config().force_always_deep:
+            deep_mode = True
+    except Exception:
+        pass
 
     asyncio.create_task(
         background_graph_runner(

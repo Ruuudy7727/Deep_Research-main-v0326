@@ -163,6 +163,8 @@ def run_one(
     request_timeout: float,
     stream_timeout: float,
     reset_between: bool,
+    force_mode: Optional[str] = None,
+    variant: str = "full",
 ) -> JsonDict:
     if reset_between:
         try:
@@ -172,6 +174,8 @@ def run_one(
 
     question = str(item.get("question") or "").strip()
     mode = str(item.get("mode") or "fast").strip().lower()
+    if force_mode:
+        mode = force_mode.strip().lower()
     payload: JsonDict = {"message": question, "mode": mode}
     if item.get("clarify_route"):
         payload["clarify_route"] = item["clarify_route"]
@@ -185,6 +189,8 @@ def run_one(
         "gold_task_type": item.get("gold_task_type"),
         "gold_action": item.get("gold_action"),
         "gold_tables": item.get("gold_tables") or [],
+        "variant": variant,
+        "effective_mode": mode,
         "started_at_unix": started_at,
         "status": "unknown",
         "events_seen": [],
@@ -386,6 +392,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:50221")
     parser.add_argument("--dataset", type=Path, default=Path("eval/datasets/server_plus_seed.jsonl"))
     parser.add_argument("--out-dir", type=Path, default=Path("eval_outputs/server_plus_seed"))
+    parser.add_argument("--variant", default="full", help="Ablation variant tag stored in results")
+    parser.add_argument("--force-mode", default=None, choices=["fast", "deep"], help="Override dataset mode")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--request-timeout", type=float, default=30.0)
     parser.add_argument("--stream-timeout", type=float, default=600.0)
@@ -412,16 +420,22 @@ def main() -> int:
         rows = rows[: args.limit]
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    (args.out_dir / "variant.json").write_text(
+        json.dumps({"variant": args.variant, "force_mode": args.force_mode}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     results: List[JsonDict] = []
 
     for idx, item in enumerate(rows, start=1):
-        print(f"[{idx}/{len(rows)}] {item.get('id')} mode={item.get('mode')} ...", flush=True)
+        print(f"[{idx}/{len(rows)}] {item.get('id')} mode={item.get('mode')} variant={args.variant} ...", flush=True)
         result = run_one(
             args.base_url,
             item,
             request_timeout=args.request_timeout,
             stream_timeout=args.stream_timeout,
             reset_between=args.reset_between,
+            force_mode=args.force_mode,
+            variant=args.variant,
         )
         results.append(result)
         write_jsonl(args.out_dir / "results.jsonl", results)

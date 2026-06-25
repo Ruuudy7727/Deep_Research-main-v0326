@@ -1,0 +1,4 @@
+{"id":"alerting_001","category":"alerting","question":"pack-7 在 2026-04-18 当天有哪些告警？请从 summary_cn 里归纳主要异常类型","mode":"fast","gold_task_type":"alerting","gold_action":"DATABASE","gold_tables":["alarm_event"]}
+{"id":"station_001","category":"station_device_td","question":"查询 BMS（bmu_code=00012001001001017）在 2025-03-18 16:30 到 17:00 的 SOH、电流和电压变化，并绘制该时段电压随时间变化的折线图","mode":"fast","gold_task_type":"station_device_td","gold_action":"DATABASE_CHART","gold_tables":["bmu_data"]}
+{"id":"troubleshooting_001","category":"troubleshooting","question":"找出2026年1月的00256006001009006 这个pack之下内阻异常超过5天的电芯数据，并进行分析","mode":"fast","gold_task_type":"troubleshooting","gold_action":"DATABASE","gold_tables":["dcr_abnormal_cells"]}
+{"id":"troubleshooting_002","category":"troubleshooting","question":"列出 bmu_code='00256001001001001' 且 2026 年 3 月滑窗内 microshort_score 高于 0.6 的电芯，按分降序","mode":"fast","gold_task_type":"troubleshooting","gold_action":"DATABASE","gold_tables":["isc_score_result"]}

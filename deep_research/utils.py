@@ -424,7 +424,12 @@ bm25_docs_plan: List["Document"] = []
 bm25_doc_ids_plan: List[str] = []
 bm25_ready_plan: bool = False
 
-BM25_ALPHA = 0.6
+try:
+    from deep_research.ablation_config import get_ablation_config
+
+    BM25_ALPHA = get_ablation_config().bm25_alpha
+except Exception:
+    BM25_ALPHA = 0.6
 FINAL_TOP_K = 3
 
 def zh_tokenize(text: str) -> List[str]:

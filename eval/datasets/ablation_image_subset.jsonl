@@ -1,0 +1,8 @@
+{"id":"kb_001","category":"kb_retrieval","question":"电芯失效分析流程是怎样的？","mode":"fast","gold_task_type":"kb_retrieval","gold_action":"RETRIEVE","notes":"Failure-analysis flow with diagram evidence."}
+{"id":"rag_002","category":"kb_retrieval","question":"请详细解释 LFP 电池的电压平台特性，以及这种特性为何会导致 SOC 估算困难？","mode":"fast","gold_task_type":"kb_retrieval","gold_action":"RETRIEVE","source_file":"15_fintune_data.jsonl"}
+{"id":"rag_003","category":"kb_retrieval","question":"BMS 系统中的 SOC 估算通常采用哪些算法？卡尔曼滤波法相比安时积分法有什么优势？","mode":"fast","gold_task_type":"kb_retrieval","gold_action":"RETRIEVE","source_file":"15_fintune_data.jsonl"}
+{"id":"rag_006","category":"kb_retrieval","question":"请详细对比安时积分法与扩展卡尔曼滤波 EKF 算法在电池 SOC 估算中的优缺点及适用场景。","mode":"fast","gold_task_type":"kb_retrieval","gold_action":"RETRIEVE","source_file":"15_fintune_data.jsonl"}
+{"id":"deep_doc_001","category":"deep_research","question":"某电芯在多个循环中表现为：中段电压平台差异不大；放电末端电压更早塌陷；高倍率下压降更明显；低倍率下容量差异相对较小。请分析这更可能说明什么问题，并给出你的推理链条。","mode":"deep","gold_task_type":"deep_research","gold_action":"DEEP","source_file":"14_大储问题收集.docx"}
+{"id":"deep_doc_004","category":"deep_research","question":"同样是电压异常偏低，可能来自容量衰减、内阻升高、温度影响、SOC 初值偏差，甚至传感器问题。请说明如何组织一个合理的替代解释优先级。","mode":"deep","gold_task_type":"deep_research","gold_action":"DEEP","source_file":"14_大储问题收集.docx"}
+{"id":"deep_doc_009","category":"deep_research","question":"现场反馈 LFP 电池簇在 SOC 低于 20% 时电压压差突然拉大，且伴随单体过放报警，这通常是什么原因导致的，该怎么处理？","mode":"deep","gold_task_type":"deep_research","gold_action":"DEEP","source_file":"14_大储问题收集.docx"}
+{"id":"deep_001","category":"deep_research","question":"在磷酸铁锂-石墨电池包中，电池串联，某电芯放电全程偏低，充电<80%SOC偏高，>80%SOC正常。且该电芯的内阻偏大。该电池是什么故障？","mode":"deep","gold_task_type":"deep_research","gold_action":"DEEP","notes":"Deep diagnostic with mechanism reasoning."}

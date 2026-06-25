@@ -1,0 +1,12 @@
+{"id":"direct_001","category":"direct","question":"请自我介绍","mode":"fast","gold_task_type":"direct","gold_action":"DIRECT"}
+{"id":"kb_001","category":"kb_retrieval","question":"电芯失效分析流程是怎样的？","mode":"fast","gold_task_type":"kb_retrieval","gold_action":"RETRIEVE"}
+{"id":"kb_002","category":"kb_retrieval","question":"热解粒子传感器试验设备介绍","mode":"fast","gold_task_type":"kb_retrieval","gold_action":"RETRIEVE"}
+{"id":"station_001","category":"station_device_td","question":"查询 BMS（bmu_code=00012001001001017）在 2025-03-18 16:30 到 17:00 的 SOH、电流和电压变化，并绘制该时段电压随时间变化的折线图","mode":"fast","gold_task_type":"station_device_td","gold_action":"DATABASE_CHART","gold_tables":["bmu_data"]}
+{"id":"alerting_001","category":"alerting","question":"pack-7 在 2026-04-18 当天有哪些告警？请从 summary_cn 里归纳主要异常类型","mode":"fast","gold_task_type":"alerting","gold_action":"DATABASE","gold_tables":["alarm_event"]}
+{"id":"troubleshooting_001","category":"troubleshooting","question":"找出2026年1月的00256006001009006 这个pack之下内阻异常超过5天的电芯数据，并进行分析","mode":"fast","gold_task_type":"troubleshooting","gold_action":"DATABASE","gold_tables":["dcr_abnormal_cells"]}
+{"id":"troubleshooting_002","category":"troubleshooting","question":"列出 bmu_code='00256001001001001' 且 2026 年 3 月滑窗内 microshort_score 高于 0.6 的电芯，按分降序","mode":"fast","gold_task_type":"troubleshooting","gold_action":"DATABASE","gold_tables":["isc_score_result"]}
+{"id":"sql_capacity_001","category":"troubleshooting","question":"BMU 00256001001004002 里，电芯 31 容量不一致的异常原因、方向、置信度分别是什么？首次与最近一次判定时间各是什么时候？","mode":"fast","gold_task_type":"troubleshooting","gold_action":"DATABASE","gold_tables":["capacity_inconsistent_cells"]}
+{"id":"sql_dcr_002","category":"troubleshooting","question":"查询 bmu_code='00256006001009006' 下所有内阻异常电芯，按 abnormal_days 从多到少排序。","mode":"fast","gold_task_type":"troubleshooting","gold_action":"DATABASE","gold_tables":["dcr_abnormal_cells"]}
+{"id":"sql_isc_002","category":"troubleshooting","question":"找出所有 ISC 综合评分大于 0.8 的高风险电芯，按评分降序排列。","mode":"fast","gold_task_type":"troubleshooting","gold_action":"DATABASE","gold_tables":["isc_score_result"]}
+{"id":"sql_alert_003","category":"alerting","question":"站点 00256 中 pack-3 在 2026-03-22 一天的告警里，平均严重度最高的是哪几条？请看 average_severity。","mode":"fast","gold_task_type":"alerting","gold_action":"DATABASE","gold_tables":["alarm_event"]}
+{"id":"rag_014","category":"kb_retrieval","question":"什么是一致性异常？在电池系统中，单体电压一致性变差可能对应哪些不同层面的原因？","mode":"fast","gold_task_type":"kb_retrieval","gold_action":"RETRIEVE"}

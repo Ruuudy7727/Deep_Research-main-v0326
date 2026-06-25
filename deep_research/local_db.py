@@ -131,7 +131,14 @@ _bm25_doc_ids: List[str] = []
 _bm25_ready: bool = False
 
 # 融合权重与TopK
-_BM25_ALPHA = 0.5
+try:
+    from deep_research.ablation_config import get_ablation_config
+
+    _BM25_ALPHA = get_ablation_config().bm25_alpha if get_ablation_config().bm25_alpha else 0.5
+    if get_ablation_config().disable_bm25:
+        _BM25_ALPHA = 0.0
+except Exception:
+    _BM25_ALPHA = 0.5
 _FINAL_TOP_K = 3
 
 def _pick_existing_collection(client, prefer_name: Optional[str]) -> Optional[str]:

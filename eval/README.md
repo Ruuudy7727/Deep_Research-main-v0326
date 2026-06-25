@@ -77,3 +77,25 @@ Useful fields collected from SSE:
 
 These are enough for routing accuracy, database-query evaluation, retrieval
 evidence statistics, chart-generation statistics, and end-to-end latency tables.
+
+## Ablation Study (Table III)
+
+See **[ABLATION_SERVER.md](ABLATION_SERVER.md)** for the full server runbook.
+
+Quick reference:
+
+```bash
+# 1) Full baseline
+python eval/run_ablation_suite.py --variants full
+
+# 2) Each ablation: set env from eval/ablation_variants.json, restart server, then:
+python eval/run_ablation_suite.py --variants wo_bm25
+
+# 3) Generate paper tables
+python eval/compare_ablation_results.py
+```
+
+New CLI flags on `run_frontend_api_eval.py`:
+
+- `--variant NAME` — tag stored in `variant.json` / each result row
+- `--force-mode fast|deep` — used by w/o Routing ablation

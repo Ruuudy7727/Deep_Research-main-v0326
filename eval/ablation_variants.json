@@ -1,0 +1,54 @@
+{
+  "full": {
+    "description": "Ours-Full reference system",
+    "env": {
+      "ABLATION_VARIANT": "full"
+    },
+    "datasets": ["seed", "sql", "rag", "deep"]
+  },
+  "wo_routing": {
+    "description": "w/o complexity routing — all queries forced through Deep path",
+    "env": {
+      "ABLATION_VARIANT": "wo_routing",
+      "ABLATION_FORCE_ALWAYS_DEEP": "1",
+      "ABLATION_FORCE_ALWAYS_COMPLEX": "1"
+    },
+    "datasets": ["seed"],
+    "eval_overrides": {
+      "force_mode": "deep"
+    }
+  },
+  "wo_bm25": {
+    "description": "w/o BM25 — dense-only hybrid retrieval",
+    "env": {
+      "ABLATION_VARIANT": "wo_bm25",
+      "ABLATION_DISABLE_BM25": "1",
+      "BM25_ALPHA": "0"
+    },
+    "datasets": ["rag", "seed_kb"]
+  },
+  "wo_schema": {
+    "description": "w/o schema constraint — direct Text-to-SQL",
+    "env": {
+      "ABLATION_VARIANT": "wo_schema",
+      "ABLATION_DISABLE_SCHEMA": "1"
+    },
+    "datasets": ["sql", "seed_db"]
+  },
+  "wo_images": {
+    "description": "w/o image metadata — text-only RAG evidence",
+    "env": {
+      "ABLATION_VARIANT": "wo_images",
+      "ABLATION_DISABLE_IMAGES": "1"
+    },
+    "datasets": ["image_subset"]
+  },
+  "wo_tot": {
+    "description": "w/o ToT planning — supervisor routes without chain-of-thought plan",
+    "env": {
+      "ABLATION_VARIANT": "wo_tot",
+      "ABLATION_DISABLE_TOT": "1"
+    },
+    "datasets": ["tot_mixed"]
+  }
+}

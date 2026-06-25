@@ -335,10 +335,27 @@ def clarify_with_user(state: AgentState) -> dict:
     # 4. 提取核心字段
     is_deep_research = response.need_deepresearch  # 是否复杂任务
 
+    try:
+        from deep_research.ablation_config import get_ablation_config
+
+        abl = get_ablation_config()
+        if abl.force_always_complex:
+            is_deep_research = True
+    except Exception:
+        pass
+
     # 提取思维链：仅在简单任务且有内容时提取
     tot_outline = ""
     if not is_deep_research and response.question:
         tot_outline = response.question.strip()
+
+    try:
+        from deep_research.ablation_config import get_ablation_config
+
+        if get_ablation_config().disable_tot:
+            tot_outline = ""
+    except Exception:
+        pass
 
     # 日志
     print(f"--- 判定结果: 复杂={is_deep_research} ---", flush=True)
