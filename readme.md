@@ -66,21 +66,38 @@
 请在项目根目录准备 `.env`，至少包含以下关键项（按你的实际网关/平台填写）：
 
 ```bash
-# LLM
+# ========== Provider 选择 ==========
+# dashscope（默认，百炼 OpenAI 兼容）| midea（美的 Gemini 回退）
+LLM_PROVIDER=dashscope
+
+# ========== DashScope（百炼）==========
+DASHSCOPE_API_KEY=sk-xxx
+DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_MODEL_FAST=qwen3.7-plus          # 同步快路径 + 读图
+LLM_MODEL_DEEP=qwen3.7-max           # 流式长报告（RPO）
+LLM_ENABLE_THINKING_FAST=0
+LLM_ENABLE_THINKING_DEEP=1
+
+# ========== Midea 回退（LLM_PROVIDER=midea 时使用）==========
 MIDEA_API_KEY=xxx
 MIDEA_AIGC_USER=your_user
 GEMINI_AIMP_BIZ_ID=gemini-2.5-flash
 GEMINI_MODEL=gemini-2.5-flash
 
-# RPO（可选，流式最终报告通道）
+# RPO（可选，流式最终报告通道；仅 midea）
 MIDEA_API_KEY_RPO=xxx
 GEMINI_AIMP_BIZ_ID_RPO=xxx
 GEMINI_MODEL_RPO=xxx
 
-# Embedding
-EMBED_API_KEY=xxx
-EMBED_BASE_URL=https://aimpapi.midea.com/t-aigc/aimp-text-embedding/v1
-EMBED_MODEL=Qwen3-Embedding-4B
+# ========== Embedding ==========
+# 默认百炼 text-embedding-v4（换模型后需重建 Chroma：python step2.5_json2chroma.py）
+EMBED_API_KEY=sk-xxx
+EMBED_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+EMBED_MODEL=text-embedding-v4
+EMBED_DIMENSIONS=1024
+# 若继续用美的 embedding，示例：
+# EMBED_BASE_URL=https://aimpapi.midea.com/t-aigc/aimp-text-embedding/v1
+# EMBED_MODEL=Qwen3-Embedding-4B
 
 # 检索库
 CHROMA_PERSIST_DIR=./rag_data/all
@@ -97,6 +114,18 @@ PUBLIC_API_TOKEN=change_me
 # 图表MCP（默认本地）
 MCP_CHART_SERVER_URL=http://localhost:1122
 ```
+
+联调百炼 LLM（含流式末帧 usage 校验）：
+
+```bash
+python test.py
+```
+
+每轮问答的 token 汇总会出现在：
+
+- SSE `event: state` / `event: complete` 的 `llm_usage` 字段
+- `log/runs/<run_id>/events.jsonl` 的 `llm_usage_summary` 事件
+- 评测 `eval/run_experiment.py` 写入的 `results.jsonl` 行内 `llm_usage`
 
 ---
 

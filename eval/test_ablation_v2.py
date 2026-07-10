@@ -82,6 +82,76 @@ class RunnerTests(unittest.TestCase):
             "routing", "sql", "retrieval", "deep"
         }}, {"routing": 10, "sql": 10, "retrieval": 10, "deep": 10})
 
+    def test_sql_no_clarify_dataset_contract(self):
+        path = ROOT / "eval" / "datasets" / "v2_sql_20_no_clarify.jsonl"
+        rows = [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        self.assertEqual(len(rows), 20)
+        self.assertEqual(len({r["id"] for r in rows}), 20)
+        self.assertTrue(all(r["subset"] == "sql" for r in rows))
+        self.assertEqual(
+            {scenario: sum(r["scenario"] == scenario for r in rows) for scenario in {
+                "alerting", "troubleshooting", "station_device_td"
+            }},
+            {"alerting": 5, "troubleshooting": 10, "station_device_td": 5},
+        )
+        self.assertEqual(sum(r["gold_action"] == "DATABASE" for r in rows), 18)
+        self.assertEqual(sum(r["gold_action"] == "DATABASE_CHART" for r in rows), 2)
+        self.assertTrue(all(r.get("gold_tables") for r in rows))
+        self.assertTrue(all(r.get("gold_sql_terms") for r in rows))
+        self.assertTrue(all("20" in r["question"] for r in rows))
+
+    def test_runner_accepts_explicit_dataset(self):
+        path = ROOT / "eval" / "datasets" / "v2_sql_20_no_clarify.jsonl"
+        rows = self.runner.load_dataset("full", path)
+        self.assertEqual(len(rows), 20)
+        self.assertEqual(len(self.runner.load_dataset("wo_schema", path)), 20)
+        self.assertEqual(len(self.runner.dataset_sha256(path)), 64)
+
+    def test_sql_specialized_metrics_include_clarification(self):
+        rows = [{
+            "id": "sql_x",
+            "subset": "sql",
+            "status": "done",
+            "gold_action": "DATABASE",
+            "gold_task_type": "troubleshooting",
+            "observed_action": "CLARIFY",
+            "observed_task_type": "troubleshooting",
+            "gold_tables": ["isc_score_result"],
+            "gold_sql_terms": ["x"],
+            "executed_sqls": [],
+            "sql_row_count": 0,
+            "expected_row_count_min": 0,
+            "expected_row_count_max": 10,
+        }]
+        metrics = self.analyzer.sql_specialized_metrics(rows)
+        self.assertEqual(metrics["clarification_rate"], 1.0)
+        self.assertEqual(metrics["sql_generation_rate"], 0.0)
+
+    def test_sql_ready_success_does_not_require_nonempty_rows(self):
+        rows = [{
+            "id": "sql_empty_but_valid",
+            "subset": "sql",
+            "status": "done",
+            "gold_action": "DATABASE",
+            "gold_task_type": "alerting",
+            "observed_action": "DATABASE",
+            "observed_task_type": "alerting",
+            "gold_tables": ["alarm_event"],
+            "gold_sql_terms": ["pack-7", "2026-03-22"],
+            "executed_sqls": [
+                "SELECT * FROM alarm_event WHERE bmu_code='pack-7' "
+                "AND start_time >= '2026-03-22 00:00:00'"
+            ],
+            "sql_row_count": 0,
+        }]
+        metrics = self.analyzer.sql_specialized_metrics(rows)
+        self.assertEqual(metrics["sql_ready_success_rate"], 1.0)
+        self.assertEqual(metrics["sql_nonempty_result_rate"], 0.0)
+
     def test_sse_parser(self):
         raw = [
             b"event: state\n",
@@ -136,6 +206,48 @@ class RunnerTests(unittest.TestCase):
         }]
         self.assertEqual(self.analyzer.validate_trace("wo_images", good), [])
         self.assertTrue(self.analyzer.validate_trace("wo_images", bad))
+
+    def test_judge_parser_accepts_fenced_and_missing_comma_json(self):
+        fenced = """```json
+        {
+          "A": {"correctness": 5, "completeness": 4, "traceability": 3,
+                "actionability": 4, "uncertainty": 5},
+          "B": {"correctness": 3, "completeness": 3, "traceability": 2,
+                "actionability": 3, "uncertainty": 4},
+          "preferred": "A",
+          "reason": "A is stronger"
+        }
+        ```"""
+        parsed = self.analyzer.parse_judge_json(fenced)
+        self.assertEqual(parsed["A"]["correctness"], 5)
+        self.assertEqual(parsed["preferred"], "A")
+
+        missing_commas = """
+        {
+          "A": {"correctness": 5 "completeness": 4 "traceability": 3
+                "actionability": 4 "uncertainty": 5},
+          "B": {"correctness": 3 "completeness": 3 "traceability": 2
+                "actionability": 3 "uncertainty": 4},
+          "preferred": "A",
+          "reason": "A is stronger"
+        }"""
+        parsed = self.analyzer.parse_judge_json(missing_commas)
+        self.assertEqual(parsed["B"]["traceability"], 2)
+
+    def test_builtin_env_loader(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".env"
+            path.write_text(
+                'CODEX_TEST_ENV_A="alpha"\nexport CODEX_TEST_ENV_B=beta\n',
+                encoding="utf-8",
+            )
+            os.environ.pop("CODEX_TEST_ENV_A", None)
+            os.environ.pop("CODEX_TEST_ENV_B", None)
+            self.analyzer.load_env_file(path)
+            self.assertEqual(os.environ["CODEX_TEST_ENV_A"], "alpha")
+            self.assertEqual(os.environ["CODEX_TEST_ENV_B"], "beta")
+            os.environ.pop("CODEX_TEST_ENV_A", None)
+            os.environ.pop("CODEX_TEST_ENV_B", None)
 
     def test_strict_image_and_multi_agent_validation(self):
         image_bad = [{

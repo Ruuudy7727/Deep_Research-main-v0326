@@ -1,33 +1,47 @@
+# -*- coding: utf-8 -*-
+"""LLM chat wrappers with DashScope (default) and Midea Gemini providers.
+
+Public API stays stable for agents:
+  - gemini_chat_once(...)
+  - gemini_chat_once_rpo(...)  # streaming iterator
+  - qwen_chat_once(...)       # legacy Midea Qwen helper
+"""
+
+from __future__ import annotations
+
 import json
-import requests
-import traceback
-from typing import Tuple, Dict, Any, Iterator
-from dotenv import load_dotenv
 import os
-import statistics
+import sys
 import time
+import traceback
 from pathlib import Path
+from typing import Any, Dict, Iterator, List, Optional, Tuple
+
+import requests
+from dotenv import load_dotenv
 
 try:
     from requests.adapters import HTTPAdapter
     from urllib3.util.retry import Retry
+
     _HAVE_RETRY = True
 except Exception:
     HTTPAdapter = None  # type: ignore
     Retry = None  # type: ignore
     _HAVE_RETRY = False
 
-# 项目根目录（deep_research/ 的上一级）
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-# 加载环境变量
 ENV_PATH = str(_PROJECT_ROOT / ".env")
 load_dotenv(dotenv_path=ENV_PATH, override=False)
 
+try:
+    from deep_research.llm_usage import record_usage, usage_from_openai_response
+except Exception:
+    from llm_usage import record_usage, usage_from_openai_response  # type: ignore
+
 
 # =============================================================================
-# 复用 HTTP 连接：避免每次 LLM 调用都做新的 TCP/TLS 握手 (~100-300ms)。
-# Deep 模式 10-15 次 LLM 调用累积可省 1-4s。
+# Shared HTTP session (Midea paths)
 # =============================================================================
 def _build_pooled_session() -> requests.Session:
     sess = requests.Session()
@@ -53,36 +67,266 @@ _HTTP_SESSION: requests.Session = _build_pooled_session()
 
 
 def get_http_session() -> requests.Session:
-    """暴露给宿主程序复用的 Session（已启用 keep-alive + retry）。"""
     return _HTTP_SESSION
 
 
-# 分场景超时：planner / router 应该秒级返回；只有 final report / 多模态会更久。
 GEMINI_TIMEOUT_FAST = float(os.getenv("GEMINI_TIMEOUT_FAST", "45"))
 GEMINI_TIMEOUT_LONG = float(os.getenv("GEMINI_TIMEOUT_LONG", "120"))
 
-# --- 标准模型配置 ---
+# --- Provider selection ---
+LLM_PROVIDER = (os.getenv("LLM_PROVIDER", "dashscope") or "dashscope").strip().lower()
+if LLM_PROVIDER not in {"dashscope", "midea"}:
+    LLM_PROVIDER = "dashscope"
+
+# --- DashScope (OpenAI compatible) ---
+DASHSCOPE_API_KEY = (
+    os.getenv("DASHSCOPE_API_KEY", "").strip()
+    or os.getenv("QWEN_API_KEY", "").strip()
+)
+DASHSCOPE_BASE_URL = (
+    os.getenv("DASHSCOPE_BASE_URL", "").strip()
+    or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+).rstrip("/")
+LLM_MODEL_FAST = os.getenv("LLM_MODEL_FAST", "").strip() or "qwen3.7-plus"
+LLM_MODEL_DEEP = os.getenv("LLM_MODEL_DEEP", "").strip() or "qwen3.7-max"
+LLM_ENABLE_THINKING_FAST = os.getenv("LLM_ENABLE_THINKING_FAST", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+LLM_ENABLE_THINKING_DEEP = os.getenv("LLM_ENABLE_THINKING_DEEP", "1").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+
+# --- Midea Gemini ---
 MIDEA_API_KEY = os.getenv("MIDEA_API_KEY", "")
 MIDEA_AIGC_USER = os.getenv("MIDEA_AIGC_USER", "user")
 GEMINI_URL_SYNC = "https://aimpapi.midea.com/t-aigc/mip-chat-app/gemini/official/standard/sync/v1/chat/completions"
 GEMINI_AIMP_BIZ_ID = os.getenv("GEMINI_AIMP_BIZ_ID", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "user")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
-# --- [新增] RPO 最终报告专用配置 ---
 MIDEA_API_KEY_RPO = os.getenv("MIDEA_API_KEY_RPO", "")
 GEMINI_AIMP_BIZ_ID_RPO = os.getenv("GEMINI_AIMP_BIZ_ID_RPO", "")
 GEMINI_MODEL_RPO = os.getenv("GEMINI_MODEL_RPO", "")
 GEMINI_URL_SYNC_RPO = "https://aimpapi.midea.com/t-aigc/mip-chat-app/gemini/official/standard/stream/v2/chat/completions"
 
+# --- Legacy Midea Qwen ---
 QWEN_API_KEY = os.getenv("QWEN_API_KEY", "")
 QWEN_URL = os.getenv("QWEN_URL", "https://aimpapi.midea.com/t-aigc/aimp-qwen3-32b/v1/chat/completions")
 QWEN_MODEL = os.getenv("QWEN_MODEL", "/model/qwen3-32b")
 
+_dashscope_client = None
 
-def gemini_chat_once(user_text: str, system_instruction: str, temperature: float = 0.3, max_tokens: int = 4096) -> Tuple[str, Dict[str, Any]]:
-    """
-    标准 Gemini 非流式接口
-    """
+
+def get_llm_provider() -> str:
+    return LLM_PROVIDER
+
+
+def get_fast_model_name() -> str:
+    if LLM_PROVIDER == "midea":
+        return GEMINI_MODEL or "gemini-2.5-flash"
+    return LLM_MODEL_FAST
+
+
+def get_deep_model_name() -> str:
+    if LLM_PROVIDER == "midea":
+        return GEMINI_MODEL_RPO or GEMINI_MODEL or "gemini-rpo"
+    return LLM_MODEL_DEEP
+
+
+def _get_dashscope_client():
+    global _dashscope_client
+    if _dashscope_client is not None:
+        return _dashscope_client
+    if not DASHSCOPE_API_KEY:
+        raise RuntimeError("DASHSCOPE_API_KEY (or QWEN_API_KEY) is not set")
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise RuntimeError("openai package required for DashScope provider") from exc
+    _dashscope_client = OpenAI(
+        api_key=DASHSCOPE_API_KEY,
+        base_url=DASHSCOPE_BASE_URL,
+        timeout=GEMINI_TIMEOUT_LONG,
+    )
+    return _dashscope_client
+
+
+def _build_messages(user_text: str, system_instruction: str) -> List[Dict[str, Any]]:
+    messages: List[Dict[str, Any]] = []
+    if system_instruction:
+        messages.append({"role": "system", "content": system_instruction})
+    messages.append({"role": "user", "content": user_text or ""})
+    return messages
+
+
+# =============================================================================
+# DashScope paths
+# =============================================================================
+def _dashscope_chat_once(
+    user_text: str,
+    system_instruction: str,
+    temperature: float = 0.3,
+    max_tokens: int = 4096,
+    *,
+    model: Optional[str] = None,
+    enable_thinking: Optional[bool] = None,
+    stage: str = "sync",
+) -> Tuple[str, Dict[str, Any]]:
+    model_name = (model or LLM_MODEL_FAST).strip() or LLM_MODEL_FAST
+    thinking = LLM_ENABLE_THINKING_FAST if enable_thinking is None else bool(enable_thinking)
+    try:
+        client = _get_dashscope_client()
+        kwargs: Dict[str, Any] = {
+            "model": model_name,
+            "messages": _build_messages(user_text, system_instruction),
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "extra_body": {"enable_thinking": thinking},
+        }
+        resp = client.chat.completions.create(**kwargs)
+        text = ""
+        if resp.choices:
+            text = (resp.choices[0].message.content or "").strip()
+        usage = usage_from_openai_response(resp)
+        record_usage(usage, model=model_name, stage=stage)
+        if not text:
+            print(
+                f"[DashScope Sync] empty text (model={model_name!r}, thinking={thinking})",
+                flush=True,
+            )
+        return text, usage
+    except Exception as e:
+        print(f"DashScope Sync Error: {e}", flush=True)
+        traceback.print_exc()
+        return f"Error: {str(e)}", {}
+
+
+def _dashscope_chat_stream(
+    user_text: str,
+    system_instruction: str,
+    temperature: float = 0.3,
+    max_tokens: int = 8192,
+    *,
+    model: Optional[str] = None,
+    enable_thinking: Optional[bool] = None,
+    stage: str = "stream",
+) -> Iterator[Tuple[str, Dict[str, Any]]]:
+    model_name = (model or LLM_MODEL_DEEP).strip() or LLM_MODEL_DEEP
+    thinking = LLM_ENABLE_THINKING_DEEP if enable_thinking is None else bool(enable_thinking)
+    try:
+        client = _get_dashscope_client()
+    except Exception as e:
+        yield f"[Config Error] {e}", {}
+        return
+
+    kwargs: Dict[str, Any] = {
+        "model": model_name,
+        "messages": _build_messages(user_text, system_instruction),
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+        "extra_body": {"enable_thinking": thinking},
+    }
+
+    final_text = ""
+    usage_metadata: Dict[str, Any] = {}
+    try:
+        stream = client.chat.completions.create(**kwargs)
+        for chunk in stream:
+            chunk_usage = usage_from_openai_response(chunk)
+            if chunk_usage:
+                usage_metadata = chunk_usage
+
+            if not getattr(chunk, "choices", None):
+                continue
+            delta = chunk.choices[0].delta
+            # Prefer answer content; ignore reasoning_content for the yielded answer text.
+            content = getattr(delta, "content", None) or ""
+            if content:
+                final_text += content
+                yield final_text, usage_metadata
+    except Exception as e:
+        err = f"DashScope stream failed: {e}"
+        print(err, flush=True)
+        traceback.print_exc()
+        yield err, usage_metadata
+        return
+
+    if usage_metadata:
+        record_usage(usage_metadata, model=model_name, stage=stage)
+    else:
+        print(
+            f"[DashScope Stream] WARNING: no usage in final chunk "
+            f"(model={model_name!r}). Ensure stream_options.include_usage=True.",
+            flush=True,
+        )
+    yield final_text, usage_metadata
+
+
+def dashscope_chat_once_multimodal(
+    user_text: str,
+    system_instruction: str,
+    *,
+    image_data_urls: List[str],
+    temperature: float = 0.3,
+    max_tokens: int = 4096,
+    model: Optional[str] = None,
+    stage: str = "multimodal",
+) -> Tuple[str, Dict[str, Any]]:
+    """Sync multimodal call for DashScope (OpenAI image_url format)."""
+    model_name = (model or LLM_MODEL_FAST).strip() or LLM_MODEL_FAST
+    content: List[Dict[str, Any]] = []
+    if user_text:
+        content.append({"type": "text", "text": user_text})
+    for url in image_data_urls:
+        if not url:
+            continue
+        content.append({"type": "image_url", "image_url": {"url": url}})
+    messages: List[Dict[str, Any]] = []
+    if system_instruction:
+        messages.append({"role": "system", "content": system_instruction})
+    messages.append({"role": "user", "content": content})
+
+    try:
+        client = _get_dashscope_client()
+        resp = client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            extra_body={"enable_thinking": False},
+        )
+        text = ""
+        if resp.choices:
+            text = (resp.choices[0].message.content or "").strip()
+        usage = usage_from_openai_response(resp)
+        record_usage(usage, model=model_name, stage=stage)
+        return text, usage
+    except Exception as e:
+        print(f"DashScope Multimodal Error: {e}", flush=True)
+        traceback.print_exc()
+        return f"Error: {str(e)}", {}
+
+
+# =============================================================================
+# Midea Gemini paths (preserved)
+# =============================================================================
+def _midea_gemini_chat_once(
+    user_text: str,
+    system_instruction: str,
+    temperature: float = 0.3,
+    max_tokens: int = 4096,
+    *,
+    stage: str = "sync",
+) -> Tuple[str, Dict[str, Any]]:
     headers = {
         "Authorization": f"Bearer {MIDEA_API_KEY}",
         "Aimp-Biz-Id": GEMINI_AIMP_BIZ_ID,
@@ -101,57 +345,72 @@ def gemini_chat_once(user_text: str, system_instruction: str, temperature: float
             headers=headers,
             json=body,
             timeout=GEMINI_TIMEOUT_FAST,
-            proxies={"http": None, "https": None}
+            proxies={"http": None, "https": None},
         )
         resp.raise_for_status()
         data = resp.json()
-        text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-        return text, data.get("usageMetadata", {})
+        candidates = data.get("candidates") or []
+        text = ""
+        if candidates:
+            text = (
+                candidates[0]
+                .get("content", {})
+                .get("parts", [{}])[0]
+                .get("text", "")
+            )
+        usage = data.get("usageMetadata", {}) or {}
+        record_usage(usage, model=GEMINI_MODEL or "gemini", stage=stage)
+        if not (text or "").strip():
+            finish = candidates[0].get("finishReason") if candidates else None
+            block = data.get("promptFeedback") or data.get("blockReason")
+            print(
+                f"[Gemini Sync] empty text (status={resp.status_code}, "
+                f"finishReason={finish!r}, block={block!r}, "
+                f"model={GEMINI_MODEL!r}, key_set={bool(MIDEA_API_KEY)})",
+                flush=True,
+            )
+            if not MIDEA_API_KEY or not GEMINI_AIMP_BIZ_ID:
+                return "Error: MIDEA_API_KEY or GEMINI_AIMP_BIZ_ID not configured", {}
+        return text, usage
     except Exception as e:
         print(f"Gemini Sync Error: {e}")
         traceback.print_exc()
         return f"Error: {str(e)}", {}
 
 
-def gemini_chat_once_rpo(user_text: str, system_instruction: str, temperature: float = 0.3, max_tokens: int = 8192) -> Iterator[Tuple[str, Dict[str, Any]]]:
-    """
-    RPO 专用通道（适配 Stream/v2 接口）- 实现真正的流式输出 (Yield)
-    """
-    # 1. 基础校验
+def _midea_gemini_chat_once_rpo(
+    user_text: str,
+    system_instruction: str,
+    temperature: float = 0.3,
+    max_tokens: int = 8192,
+    *,
+    stage: str = "stream",
+) -> Iterator[Tuple[str, Dict[str, Any]]]:
     if not MIDEA_API_KEY_RPO or not GEMINI_AIMP_BIZ_ID_RPO or not GEMINI_MODEL_RPO:
-        error_msg = "[Config Error] RPO 环境变量 (MIDEA_API_KEY_RPO, GEMINI_AIMP_BIZ_ID_RPO, GEMINI_MODEL_RPO) 未正确设置"
+        error_msg = (
+            "[Config Error] RPO 环境变量 "
+            "(MIDEA_API_KEY_RPO, GEMINI_AIMP_BIZ_ID_RPO, GEMINI_MODEL_RPO) 未正确设置"
+        )
         print(error_msg)
         yield error_msg, {}
         return
 
-    # 2. 组装 Headers (参考文档)
     headers = {
         "Authorization": f"Bearer {MIDEA_API_KEY_RPO}",
-        "Aimp-Biz-Id": GEMINI_AIMP_BIZ_ID_RPO, # 文档要求: gemini-3-pro-preview
-        "AIGC-USER": MIDEA_AIGC_USER,          # 文档要求: 4A账号
-        "Content-Type": "application/json",    # 文档要求: application/json
+        "Aimp-Biz-Id": GEMINI_AIMP_BIZ_ID_RPO,
+        "AIGC-USER": MIDEA_AIGC_USER,
+        "Content-Type": "application/json",
     }
-
-    # 3. 组装 Body (严格参考文档，移除 "stream": True)
     body = {
-        "model": GEMINI_MODEL_RPO, # 文档固定为: gemini-3-pro-preview
-        "contents": [
-            {
-                "role": "user", 
-                "parts": [{"text": user_text}]
-            }
-        ],
-        "systemInstruction": {
-            "parts": [{"text": system_instruction}]
-        },
+        "model": GEMINI_MODEL_RPO,
+        "contents": [{"role": "user", "parts": [{"text": user_text}]}],
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
         "generationConfig": {
             "temperature": temperature,
             "maxOutputTokens": max_tokens,
-            # 注意：文档中未要求在此处传 "stream": True，绝对不要加
-        }
+        },
     }
 
-    # 4. 发起请求 (stream=True 保持开启，用于接收 SSE 流)
     try:
         resp = _HTTP_SESSION.post(
             GEMINI_URL_SYNC_RPO,
@@ -159,39 +418,30 @@ def gemini_chat_once_rpo(user_text: str, system_instruction: str, temperature: f
             json=body,
             timeout=GEMINI_TIMEOUT_LONG,
             stream=True,
-            proxies={"http": None, "https": None}
+            proxies={"http": None, "https": None},
         )
         resp.raise_for_status()
     except requests.exceptions.RequestException as e:
         error_msg = f"RPO 请求失败: {str(e)}"
-        if hasattr(e, 'response') and e.response is not None:
-             error_msg += f" (Status: {e.response.status_code}, Body: {e.response.text})"
+        if hasattr(e, "response") and e.response is not None:
+            error_msg += f" (Status: {e.response.status_code}, Body: {e.response.text})"
         yield error_msg, {}
         return
 
-    # 5. 解析流式响应 (Yield)
     final_text = ""
-    usage_metadata = {}
+    usage_metadata: Dict[str, Any] = {}
 
     for line in resp.iter_lines():
         if not line:
             continue
-        
         try:
-            decoded_line = line.decode('utf-8').strip()
-            
-            # 匹配 SSE 格式: "data: {...}"
+            decoded_line = line.decode("utf-8").strip()
             if decoded_line.startswith("data: "):
-                content_str = decoded_line[6:] # 去除前缀 "data: "
-                
-                # 过滤结束标识
+                content_str = decoded_line[6:]
                 if content_str == "[DONE]":
                     break
-                    
                 try:
                     chunk = json.loads(content_str)
-                    
-                    # A. 提取文本 (candidates -> content -> parts -> text)
                     candidates = chunk.get("candidates", [])
                     if candidates:
                         parts = candidates[0].get("content", {}).get("parts", [])
@@ -199,40 +449,95 @@ def gemini_chat_once_rpo(user_text: str, system_instruction: str, temperature: f
                             text_fragment = parts[0].get("text", "")
                             if text_fragment:
                                 final_text += text_fragment
-                                # 实时 Yield 当前累积的文本
                                 yield final_text, usage_metadata
-                    
-                    # B. 提取 Token 消耗 (通常在流的更新中或最后)
                     if "usageMetadata" in chunk:
                         usage_metadata = chunk["usageMetadata"]
-                        # 如果有更新 usage，也 yield 一次
                         yield final_text, usage_metadata
-                        
                 except json.JSONDecodeError:
                     print(f"[RPO Warning] JSON 解析错误, 数据片段: {content_str[:50]}...")
                     continue
         except Exception as e:
-             print(f"[RPO Stream Error] Line processing failed: {e}")
-             continue
-    
-    # 确保最后一次 yield 包含完整的 usage
+            print(f"[RPO Stream Error] Line processing failed: {e}")
+            continue
+
+    if usage_metadata:
+        record_usage(usage_metadata, model=GEMINI_MODEL_RPO or "gemini-rpo", stage=stage)
     yield final_text, usage_metadata
 
 
-def qwen_chat_once(user_text: str, system_instruction: str = "", temperature: float = 0, max_tokens: int = 4096, enable_thinking: bool = False) -> Tuple[str, Dict[str, Any]]:
-    """
-    Qwen3 非流式接口调用
-    :param enable_thinking: 是否开启 Qwen3 的思考模式 (默认为 True)
-    """
+# =============================================================================
+# Public API (provider-routed)
+# =============================================================================
+def gemini_chat_once(
+    user_text: str,
+    system_instruction: str,
+    temperature: float = 0.3,
+    max_tokens: int = 4096,
+    **kwargs: Any,
+) -> Tuple[str, Dict[str, Any]]:
+    stage = str(kwargs.get("stage") or "sync")
+    if LLM_PROVIDER == "midea":
+        return _midea_gemini_chat_once(
+            user_text,
+            system_instruction,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stage=stage,
+        )
+    return _dashscope_chat_once(
+        user_text,
+        system_instruction,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        model=kwargs.get("model") or LLM_MODEL_FAST,
+        enable_thinking=kwargs.get("enable_thinking"),
+        stage=stage,
+    )
+
+
+def gemini_chat_once_rpo(
+    user_text: str,
+    system_instruction: str,
+    temperature: float = 0.3,
+    max_tokens: int = 8192,
+    **kwargs: Any,
+) -> Iterator[Tuple[str, Dict[str, Any]]]:
+    stage = str(kwargs.get("stage") or "stream")
+    if LLM_PROVIDER == "midea":
+        yield from _midea_gemini_chat_once_rpo(
+            user_text,
+            system_instruction,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stage=stage,
+        )
+        return
+    yield from _dashscope_chat_stream(
+        user_text,
+        system_instruction,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        model=kwargs.get("model") or LLM_MODEL_DEEP,
+        enable_thinking=kwargs.get("enable_thinking"),
+        stage=stage,
+    )
+
+
+def qwen_chat_once(
+    user_text: str,
+    system_instruction: str = "",
+    temperature: float = 0,
+    max_tokens: int = 4096,
+    enable_thinking: bool = False,
+) -> Tuple[str, Dict[str, Any]]:
+    """Legacy Midea Qwen3 non-streaming helper (unchanged endpoint)."""
     if not QWEN_API_KEY:
         print("[Warning] QWEN_API_KEY is not set in environment variables.")
 
     headers = {
         "Authorization": f"Bearer {QWEN_API_KEY}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
-
-    # 构造 messages
     messages = []
     if system_instruction:
         messages.append({"role": "system", "content": system_instruction})
@@ -243,8 +548,8 @@ def qwen_chat_once(user_text: str, system_instruction: str = "", temperature: fl
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
-        "stream": False, 
-        "chat_template_kwargs": {"enable_thinking": enable_thinking}
+        "stream": False,
+        "chat_template_kwargs": {"enable_thinking": enable_thinking},
     }
 
     try:
@@ -253,77 +558,52 @@ def qwen_chat_once(user_text: str, system_instruction: str = "", temperature: fl
             headers=headers,
             json=body,
             timeout=GEMINI_TIMEOUT_FAST,
-            proxies={"http": None, "https": None}
+            proxies={"http": None, "https": None},
         )
         resp.raise_for_status()
-        
         data = resp.json()
-        
         choices = data.get("choices", [])
         if not choices:
             return "", {}
-            
         message = choices[0].get("message", {})
         content = message.get("content", "")
-        
-        # 思考内容处理 (如果需要可以取消注释)
-        # reasoning = message.get("reasoning_content", "")
-        
-        usage = data.get("usage", {})
+        usage = data.get("usage", {}) or {}
+        record_usage(usage, model=QWEN_MODEL or "qwen", stage="qwen_legacy")
         return content, usage
-
     except Exception as e:
         print(f"Qwen API call failed: {e}")
         return "", {}
 
 
-# 假设你将提供的代码保存为了 gemini_chat.py
-# from gemini_chat import gemini_chat_once_rpo
-import time
-import sys
-
 def test_stream():
-    print("--- 开始测试 RPO 流式输出 ---")
-    
-    # 构造测试输入
+    print("--- 开始测试 RPO / Deep 流式输出 ---")
+    print(f"provider={LLM_PROVIDER} deep_model={get_deep_model_name()}")
     user_text = "请写一首关于春天的五言绝句，并逐句解释。"
     system_instruction = "你是中国古诗词专家。"
-    
-    # 调用函数，获取生成器
-    # 注意：这里函数返回的是一个 iterator，不会立即执行网络请求，直到开始遍历
     stream_generator = gemini_chat_once_rpo(
         user_text=user_text,
-        system_instruction=system_instruction
+        system_instruction=system_instruction,
     )
-    
     start_time = time.time()
     last_text_len = 0
-    
+    current_text = ""
+    usage: Dict[str, Any] = {}
     try:
-        # 遍历生成器
         for current_text, usage in stream_generator:
-            # 计算这一帧新增了多少字符
             new_chars = current_text[last_text_len:]
-            
-            # 模拟打字机效果打印出来
-            # flush=True 确保立即显示，不经过缓存
             sys.stdout.write(new_chars)
             sys.stdout.flush()
-            
             last_text_len = len(current_text)
-            
-            # 检查是否有报错信息返回 (根据代码逻辑，报错也是 yield 出来的)
             if current_text.startswith("[Config Error]") or current_text.startswith("RPO 请求失败"):
                 print(f"\n\n❌ 测试失败: {current_text}")
                 return
-
         print(f"\n\n--- 测试完成 ---")
         print(f"总耗时: {time.time() - start_time:.2f}秒")
         print(f"最终字数: {len(current_text)}")
         print(f"Token消耗: {usage}")
-
     except Exception as e:
         print(f"\n❌ 发生异常: {e}")
+
 
 if __name__ == "__main__":
     test_stream()

@@ -1380,6 +1380,7 @@ async def _execute_direct_text2sql(
     return {
         "raw_db_results": all_rows,
         "executed_sqls": executed_sqls,
+        "db_executed_sqls": executed_sqls,
         "db_route": route,
         "db_query_params": {"direct_text2sql": True, "route": route},
         "db_llm_traces": traces,

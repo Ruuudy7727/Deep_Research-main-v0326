@@ -1,0 +1,13 @@
+{
+  "structured_sources": "TODO: alarm_event, bmu_data, volt_temp_abnormal_result, isc_score_result, ...",
+  "time_span": "TODO: YYYY-MM-DD to YYYY-MM-DD",
+  "alarm_event_count": "TODO",
+  "telemetry_field_count": "TODO",
+  "diagnostic_result_count": "TODO",
+  "kb_document_count": "TODO",
+  "kb_chunk_count": "TODO",
+  "kb_image_count": "TODO",
+  "historical_case_count": "TODO",
+  "evaluation_task_count": "TODO: target 120-200",
+  "task_split": "TODO: routing=30-50, sql=50-100, retrieval=50, deep=30-50, end_to_end=20-30"
+}

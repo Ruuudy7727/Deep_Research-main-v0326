@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2100" height="1150" viewBox="0 0 2100 1150">
+<defs>
+<marker id="m2563EB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2563EB"/></marker>
+<marker id="m059669" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#059669"/></marker>
+<marker id="mD97706" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#D97706"/></marker>
+<marker id="m7C3AED" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#7C3AED"/></marker>
+</defs>
+<rect width="2100" height="1150" fill="#F8FAFC"/>
+<rect x="60" y="70" width="210" height="85" rx="16" fill="#FFFFFF" stroke="#2563EB" stroke-width="2"/>
+<text x="165" y="102" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#1E293B">
+<tspan x="165" dy="0">User Question</tspan>
+</text>
+<text x="165" y="132" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#475569">
+<tspan x="165" dy="0">maintenance query</tspan>
+</text>
+<rect x="340" y="65" width="290" height="110" rx="16" fill="#DBEAFE" stroke="#2563EB" stroke-width="2"/>
+<text x="485" y="97" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#1E293B">
+<tspan x="485" dy="0">Complexity-aware Router</tspan>
+</text>
+<text x="485" y="127" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#475569">
+<tspan x="485" dy="0">routine: alarms, measurements,</tspan>
+<tspan x="485" dy="18">lookup, charts</tspan>
+<tspan x="485" dy="18">complex: root-cause, cross-</tspan>
+<tspan x="485" dy="18">document reasoning</tspan>
+</text>
+<rect x="60" y="280" width="270" height="130" rx="16" fill="#D1FAE5" stroke="#059669" stroke-width="2"/>
+<text x="195" y="312" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#1E293B">
+<tspan x="195" dy="0">Structured Operating</tspan>
+<tspan x="195" dy="22">Data</tspan>
+</text>
+<text x="195" y="364" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#475569">
+<tspan x="195" dy="0">alarms, telemetry, diagnostic</tspan>
+<tspan x="195" dy="18">tables, time series</tspan>
+</text>
+<rect x="370" y="280" width="270" height="130" rx="16" fill="#FEF3C7" stroke="#D97706" stroke-width="2"/>
+<text x="505" y="312" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#1E293B">
+<tspan x="505" dy="0">Private Maintenance KB</tspan>
+</text>
+<text x="505" y="342" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#475569">
+<tspan x="505" dy="0">manuals, standards, failure</tspan>
+<tspan x="505" dy="18">cases, image chunks</tspan>
+</text>
+<rect x="700" y="40" width="1280" height="400" rx="22" fill="#EFF6FF" stroke="#2563EB" stroke-width="2"/>
+<text x="730" y="72" font-family="Arial,sans-serif" font-size="22" font-weight="700" fill="#2563EB">Fast Path: Single-Agent Tool Routing</text>
+<rect x="700" y="560" width="1280" height="380" rx="22" fill="#F5F3FF" stroke="#7C3AED" stroke-width="2"/>
+<text x="730" y="592" font-family="Arial,sans-serif" font-size="22" font-weight="700" fill="#7C3AED">Deep-Research Path: Multi-Agent Diagnostic Reasoning</text>
+<line x1="270" y1="112" x2="340" y2="112" stroke="#2563EB" stroke-width="2.5" marker-end="url(#m2563EB)"/>
+<line x1="630" y1="100" x2="700" y2="100" stroke="#2563EB" stroke-width="2.5" marker-end="url(#m2563EB)"/>
+<line x1="630" y1="150" x2="700" y2="650" stroke="#7C3AED" stroke-width="2.5" marker-end="url(#m7C3AED)"/>
+<text x="655" y="88+0" font-size="15" font-weight="700" fill="#2563EB">routine</text>
+<text x="645" y="370+0" font-size="15" font-weight="700" fill="#7C3AED">complex</text>
+<rect x="750" y="150" width="240" height="95" rx="16" fill="#FFFFFF" stroke="#2563EB" stroke-width="2"/>
+<text x="870" y="182" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#1E293B">
+<tspan x="870" dy="0">Single-agent</tspan>
+<tspan x="870" dy="22">Supervisor</tspan>
+</text>
+<text x="870" y="234" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#475569">
+<tspan x="870" dy="0">selects next action</tspan>
+</text>
+<rect x="1050" y="105" width="180" height="75" rx="16" fill="#FFFFFF" stroke="#2563EB" stroke-width="2"/>
+<text x="1140" y="137" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#1E293B">
+<tspan x="1140" dy="0">DIRECT</tspan>
+</text>
+<text x="1140" y="167" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#475569">
+<tspan x="1140" dy="0">general response</tspan>
+</text>
+<rect x="1280" y="105" width="180" height="75" rx="16" fill="#FFFFFF" stroke="#2563EB" stroke-width="2"/>
+<text x="1370" y="137" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#1E293B">
+<tspan x="1370" dy="0">RETRIEVE</tspan>
+</text>
+<text x="1370" y="167" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#475569">
+<tspan x="1370" dy="0">knowledge lookup</tspan>
+</text>
+<rect x="1050" y="230" width="180" height="80" rx="16" fill="#FFFFFF" stroke="#2563EB" stroke-width="2"/>
+<text x="1140" y="262" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#1E293B">
+<tspan x="1140" dy="0">DATABASE</tspan>
+</text>
+<text x="1140" y="292" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#475569">
+<tspan x="1140" dy="0">schema-constrained</tspan>
+<tspan x="1140" dy="18">SQL</tspan>
+</text>
+<rect x="1280" y="230" width="180" height="80" rx="16" fill="#FFFFFF" stroke="#2563EB" stroke-width="2"/>
+<text x="1370" y="262" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#1E293B">
+<tspan x="1370" dy="0">CHART</tspan>
+</text>
+<text x="1370" y="292" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#475569">
+<tspan x="1370" dy="0">visualization</tspan>
+</text>
+<rect x="1620" y="165" width="230" height="100" rx="16" fill="#DBEAFE" stroke="#2563EB" stroke-width="2"/>
+<text x="1735" y="197" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#1E293B">
+<tspan x="1735" dy="0">Answer Synthesis</tspan>
+</text>
+<text x="1735" y="227" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#475569">
+<tspan x="1735" dy="0">response, SQL result, or</tspan>
+<tspan x="1735" dy="18">chart</tspan>
+</text>
+<rect x="750" y="645" width="190" height="80" rx="16" fill="#FFFFFF" stroke="#7C3AED" stroke-width="2"/>
+<text x="845" y="677" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#1E293B">
+<tspan x="845" dy="0">Pre-retrieval</tspan>
+</text>
+<text x="845" y="707" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#475569">
+<tspan x="845" dy="0">initial evidence</tspan>
+</text>
+<rect x="990" y="645" width="190" height="80" rx="16" fill="#FFFFFF" stroke="#7C3AED" stroke-width="2"/>
+<text x="1085" y="677" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#1E293B">
+<tspan x="1085" dy="0">Draft generation</tspan>
+</text>
+<text x="1085" y="707" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#475569">
+<tspan x="1085" dy="0">diagnostic sketch</tspan>
+</text>
+<rect x="1230" y="630" width="260" height="110" rx="16" fill="#FFFFFF" stroke="#7C3AED" stroke-width="2"/>
+<text x="1360" y="662" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#1E293B">
+<tspan x="1360" dy="0">Supervisor-researcher</tspan>
+<tspan x="1360" dy="22">coordination</tspan>
+</text>
+<text x="1360" y="714" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#475569">
+<tspan x="1360" dy="0">iterative evidence seeking</tspan>
+</text>
+<rect x="1540" y="645" width="210" height="80" rx="16" fill="#FFFFFF" stroke="#7C3AED" stroke-width="2"/>
+<text x="1645" y="677" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#1E293B">
+<tspan x="1645" dy="0">Finding compression</tspan>
+</text>
+<text x="1645" y="707" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#475569">
+<tspan x="1645" dy="0">merge key findings</tspan>
+</text>
+<rect x="1320" y="800" width="260" height="95" rx="16" fill="#EDE9FE" stroke="#7C3AED" stroke-width="2"/>
+<text x="1450" y="832" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#1E293B">
+<tspan x="1450" dy="0">Final report synthesis</tspan>
+</text>
+<text x="1450" y="862" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#475569">
+<tspan x="1450" dy="0">diagnosis, evidence, actions</tspan>
+</text>
+<rect x="1750" y="820" width="220" height="115" rx="16" fill="#FFFFFF" stroke="#059669" stroke-width="2"/>
+<text x="1860" y="852" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#1E293B">
+<tspan x="1860" dy="0">Final Answer /</tspan>
+<tspan x="1860" dy="22">Report</tspan>
+</text>
+<text x="1860" y="904" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#475569">
+<tspan x="1860" dy="0">answer, chart, or report</tspan>
+</text>
+<line x1="990" y1="195" x2="1050" y2="142" stroke="#2563EB" stroke-width="2.5" marker-end="url(#m2563EB)"/>
+<line x1="990" y1="195" x2="1280" y2="142" stroke="#2563EB" stroke-width="2.5" marker-end="url(#m2563EB)"/>
+<line x1="990" y1="195" x2="1050" y2="268" stroke="#2563EB" stroke-width="2.5" marker-end="url(#m2563EB)"/>
+<line x1="990" y1="195" x2="1280" y2="268" stroke="#2563EB" stroke-width="2.5" marker-end="url(#m2563EB)"/>
+<line x1="1230" y1="142" x2="1620" y2="210" stroke="#2563EB" stroke-width="2.5" marker-end="url(#m2563EB)"/>
+<line x1="1460" y1="142" x2="1620" y2="210" stroke="#2563EB" stroke-width="2.5" marker-end="url(#m2563EB)"/>
+<line x1="1240" y1="268" x2="1620" y2="240" stroke="#2563EB" stroke-width="2.5" marker-end="url(#m2563EB)"/>
+<line x1="1460" y1="268" x2="1620" y2="240" stroke="#2563EB" stroke-width="2.5" marker-end="url(#m2563EB)"/>
+<line x1="940" y1="685" x2="990" y2="685" stroke="#7C3AED" stroke-width="2.5" marker-end="url(#m7C3AED)"/>
+<line x1="1180" y1="685" x2="1230" y2="685" stroke="#7C3AED" stroke-width="2.5" marker-end="url(#m7C3AED)"/>
+<line x1="1490" y1="685" x2="1540" y2="685" stroke="#7C3AED" stroke-width="2.5" marker-end="url(#m7C3AED)"/>
+<line x1="1750" y1="725" x2="1450" y2="800" stroke="#7C3AED" stroke-width="2.5" marker-end="url(#m7C3AED)"/>
+<text x="1580" y="788" font-size="14" font-weight="700" fill="#7C3AED">compressed evidence</text>
+<line x1="330" y1="345" x2="1080" y2="310" stroke="#059669" stroke-width="2.5" marker-end="url(#m059669)" stroke-dasharray="7 7"/>
+<line x1="640" y1="345" x2="1380" y2="175" stroke="#D97706" stroke-width="2.5" marker-end="url(#mD97706)" stroke-dasharray="7 7"/>
+<line x1="195" y1="410" x2="845" y2="645" stroke="#059669" stroke-width="2.5" marker-end="url(#m059669)" stroke-dasharray="7 7"/>
+<line x1="505" y1="410" x2="845" y2="645" stroke="#D97706" stroke-width="2.5" marker-end="url(#mD97706)" stroke-dasharray="7 7"/>
+<line x1="1735" y1="240" x2="1860" y2="820" stroke="#059669" stroke-width="2.5" marker-end="url(#m059669)"/>
+<line x1="1450" y1="850" x2="1750" y2="870" stroke="#059669" stroke-width="2.5" marker-end="url(#m059669)"/>
+<text x="1050" y="1100" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" fill="#475569">Both paths are grounded by structured operating data and the private maintenance knowledge base.</text>
+</svg>

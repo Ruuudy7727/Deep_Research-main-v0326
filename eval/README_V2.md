@@ -58,3 +58,8 @@ python eval/analyze_experiment.py `
 
 The local `.env` supplies model gateway credentials. Do not use the generated
 `table_iii.md` while `validation.json` contains any issue.
+
+## SQL20 专项实验
+
+新的无澄清查库题集、`full`/`wo_schema` 远程切换命令和专项分析流程见
+`eval/README_SQL20.md`。

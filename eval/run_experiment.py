@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -16,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-DATASET = ROOT / "eval" / "datasets" / "v2_ablation_40.jsonl"
+DEFAULT_DATASET = ROOT / "eval" / "datasets" / "v2_ablation_40.jsonl"
 VARIANT_SUBSETS = {
     "full": {"routing", "sql", "retrieval", "deep"},
     "wo_routing": {"routing"},
@@ -83,10 +84,22 @@ def stream(base: str, timeout: float) -> Iterable[dict[str, Any]]:
         yield from parse_sse(response)
 
 
-def load_dataset(variant: str) -> list[dict[str, Any]]:
+def resolve_dataset(path: Path) -> Path:
+    candidate = path if path.is_absolute() else ROOT / path
+    candidate = candidate.resolve()
+    if not candidate.is_file():
+        raise SystemExit(f"Dataset not found: {candidate}")
+    return candidate
+
+
+def dataset_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def load_dataset(variant: str, dataset: Path = DEFAULT_DATASET) -> list[dict[str, Any]]:
     subsets = VARIANT_SUBSETS[variant]
     rows = []
-    for line in DATASET.read_text(encoding="utf-8").splitlines():
+    for line in dataset.read_text(encoding="utf-8").splitlines():
         if line.strip():
             row = json.loads(line)
             if row["subset"] in subsets:
@@ -163,6 +176,7 @@ def run_item(base: str, item: dict[str, Any], status: dict[str, Any], timeout: f
     result["answer_elapsed_seconds"] = (
         final_state.get("answer_elapsed_seconds") or complete.get("answer_elapsed_seconds")
     )
+    result["llm_usage"] = final_state.get("llm_usage") or complete.get("llm_usage")
     result["status"] = "done" if complete.get("status") == "done" and report.strip() else "incomplete"
     return result
 
@@ -173,6 +187,12 @@ def main() -> int:
     parser.add_argument("--variant", required=True, choices=sorted(VARIANT_SUBSETS))
     parser.add_argument("--experiment-id", default="paper_v2")
     parser.add_argument("--root", type=Path, default=ROOT / "eval_outputs" / "v2")
+    parser.add_argument(
+        "--dataset",
+        type=Path,
+        default=DEFAULT_DATASET,
+        help="JSONL dataset path. Relative paths are resolved from the repository root.",
+    )
     parser.add_argument("--stream-timeout", type=float, default=1200)
     parser.add_argument("--allow-commit-mismatch", action="store_true")
     parser.add_argument("--limit", type=int)
@@ -182,6 +202,7 @@ def main() -> int:
         help="Discard completed rows from this subset and run them again.",
     )
     args = parser.parse_args()
+    dataset = resolve_dataset(args.dataset)
 
     from deep_research.ablation_config import AblationConfig
 
@@ -207,7 +228,8 @@ def main() -> int:
     manifest = {
         "experiment_id": args.experiment_id,
         "variant": args.variant,
-        "dataset": str(DATASET),
+        "dataset": str(dataset),
+        "dataset_sha256": dataset_sha256(dataset),
         "service_status": service,
         "local_git_commit": commit,
     }
@@ -215,6 +237,8 @@ def main() -> int:
         old = json.loads(manifest_path.read_text(encoding="utf-8"))
         if old["service_status"]["config_fingerprint"] != service["config_fingerprint"]:
             raise SystemExit("Refusing to resume into a directory with a different fingerprint.")
+        if old.get("dataset_sha256") != manifest["dataset_sha256"]:
+            raise SystemExit("Refusing to resume into a directory with a different dataset.")
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     results_path = out / "results.jsonl"
@@ -231,7 +255,7 @@ def main() -> int:
             if row.get("subset") != args.rerun_subset
         }
 
-    rows = load_dataset(args.variant)
+    rows = load_dataset(args.variant, dataset)
     if args.limit:
         rows = rows[: args.limit]
     for index, item in enumerate(rows, 1):

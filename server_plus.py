@@ -42,6 +42,13 @@ from deep_research.ablation_config import (
     reset_ablation_trace,
     update_ablation_trace,
 )
+from deep_research.llm_usage import get_usage_summary, record_usage, reset_usage
+from deep_research.gemini_chat import (
+    _dashscope_chat_once,
+    dashscope_chat_once_multimodal,
+    get_fast_model_name,
+    get_llm_provider,
+)
 
 from fastapi import FastAPI, Request, File, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse, Response, JSONResponse
@@ -121,6 +128,8 @@ SHARED_STATE: Dict[str, Any] = {
     # 本轮问答墙钟完成时刻与总耗时（background_graph_runner finally 写入）
     "last_answer_completed_at": None,
     "last_answer_elapsed_seconds": None,
+    # 本轮 LLM token 汇总（llm_usage.reset/record → finally 写入）
+    "llm_usage": None,
     # 本轮 Cobot 对话的文件日志（log/runs/<run_id>/）；见 deep_research/run_logging.py
     "run_session": None,
     "current_run_id": None,
@@ -237,6 +246,18 @@ def encode_image_to_base64(image_path: str) -> Optional[Dict[str, str]]:
     except Exception as e:
         print(f"[Image Encode Error] {e}", flush=True)
         return None
+
+
+def encode_image_to_data_url(image_path: str) -> Optional[str]:
+    """OpenAI/DashScope multimodal image_url payload."""
+    payload = encode_image_to_base64(image_path)
+    if not payload:
+        return None
+    mime = payload.get("mimeType") or "image/jpeg"
+    data = payload.get("data") or ""
+    if not data:
+        return None
+    return f"data:{mime};base64,{data}"
 
 
 def _chart_public_url(chart_path: Optional[str]) -> Optional[str]:
@@ -633,6 +654,39 @@ def gemini_chat_once_http(
     max_tokens: int = 4096,
     **kwargs,
 ) -> Tuple[str, Dict[str, Any]]:
+    stage = str(kwargs.get("stage") or ("multimodal" if images else "sync"))
+    provider = get_llm_provider()
+
+    # DashScope / OpenAI-compatible path (text or multimodal)
+    if provider == "dashscope":
+        if images:
+            data_urls: List[str] = []
+            for img_path in images:
+                url = encode_image_to_data_url(img_path)
+                if url:
+                    data_urls.append(url)
+            text, usage = dashscope_chat_once_multimodal(
+                user_text,
+                system_instruction,
+                image_data_urls=data_urls,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                model=kwargs.get("model") or get_fast_model_name(),
+                stage=stage,
+            )
+            return text, usage or {}
+        # Text-only: call DashScope directly (avoid patched gemini_chat_once recursion)
+        text, usage = _dashscope_chat_once(
+            user_text,
+            system_instruction,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            model=kwargs.get("model") or get_fast_model_name(),
+            stage=stage,
+        )
+        return text, usage or {}
+
+    # Midea Gemini path
     if not MIDEA_API_KEY:
         return "Error: No API Key", {}
     headers = {
@@ -659,13 +713,26 @@ def gemini_chat_once_http(
         resp = requests.post(GEMINI_URL_SYNC, headers=headers, json=body, timeout=180)
         if 200 <= resp.status_code < 300:
             data = resp.json()
-            text = (
-                data.get("candidates", [{}])[0]
-                .get("content", {})
-                .get("parts", [{}])[0]
-                .get("text", "")
-            )
-            return text, {}
+            candidates = data.get("candidates") or []
+            text = ""
+            if candidates:
+                text = (
+                    candidates[0]
+                    .get("content", {})
+                    .get("parts", [{}])[0]
+                    .get("text", "")
+                )
+            if not (text or "").strip():
+                finish = candidates[0].get("finishReason") if candidates else None
+                block = data.get("promptFeedback") or data.get("blockReason")
+                print(
+                    f"[Gemini HTTP] empty text (status={resp.status_code}, "
+                    f"finishReason={finish!r}, block={block!r}, model={GEMINI_MODEL!r})",
+                    flush=True,
+                )
+            usage = data.get("usageMetadata", {}) or {}
+            record_usage(usage, model=GEMINI_MODEL or "gemini", stage=stage)
+            return text, usage
         return f"Error: {resp.status_code} - {resp.text}", {}
     except Exception as e:
         return f"Exception: {str(e)}", {}
@@ -804,6 +871,27 @@ try:
     import deep_research.gemini_chat as original_module
 
     _original_rpo_func = original_module.gemini_chat_once_rpo
+    _original_gemini_once = original_module.gemini_chat_once
+
+    def _adapter_gemini_chat_once(
+        user_text: str,
+        system_instruction: str,
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
+        **kwargs,
+    ) -> Tuple[str, Dict[str, Any]]:
+        """Supervisor / router 等非流式调用统一走 server 侧 HTTP 封装（与 deep 图一致）。"""
+        text, usage = gemini_chat_once_http(
+            user_text,
+            system_instruction,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        if not (text or "").strip():
+            print("[Patch] gemini_chat_once returned empty text", flush=True)
+        elif str(text).startswith(("Error:", "Exception:")):
+            print(f"[Patch] gemini_chat_once: {str(text)[:500]}", flush=True)
+        return text, usage or {}
 
     def _adapter_gemini_chat_rpo(user_text, system_instruction, **kwargs):
         # ── 多模态短路：报告阶段且有 RAG 命中图，则牺牲流式改走 sync multimodal ──
@@ -843,8 +931,9 @@ try:
             final_text += f"\n[System Error during stream: {str(e)}]"
         return final_text, final_usage
 
+    original_module.gemini_chat_once = _adapter_gemini_chat_once
     original_module.gemini_chat_once_rpo = _adapter_gemini_chat_rpo
-    print("[Patch] RPO adapter mounted (multimodal-aware)", flush=True)
+    print("[Patch] gemini_chat_once + RPO adapters mounted (multimodal-aware)", flush=True)
 except ImportError:
     print("[Init] deep_research.gemini_chat not found", flush=True)
 
@@ -860,7 +949,7 @@ def _gemini_chat_sync_lc(messages: List[BaseMessage]) -> AIMessage:
     if mm is not None:
         return AIMessage(content=mm[0])
 
-    text, _ = gemini_chat_once_http(user_text, sys_text)
+    text, _usage = gemini_chat_once_http(user_text, sys_text, stage="sync_lc")
     return AIMessage(content=text)
 
 
@@ -1859,6 +1948,8 @@ async def background_graph_runner(
         SHARED_STATE["is_running"] = True
         update_ablation_trace(execution_path="deep" if deep_mode else "fast")
         SHARED_STATE["_answer_run_start_perf"] = time.perf_counter()
+        reset_usage()
+        SHARED_STATE["llm_usage"] = None
         mode_label = "Deep Research" if deep_mode else "Fast"
         SHARED_STATE["logs"].append(f"[Start - {mode_label}] {datetime.datetime.now().strftime('%H:%M:%S')}\n")
 
@@ -2183,6 +2274,15 @@ async def background_graph_runner(
         trace["retrieved_image_count"] = len(SHARED_STATE.get("retrieved_images") or [])
         trace["injected_image_count"] = len(SHARED_STATE.get("answer_images") or [])
         SHARED_STATE["ablation_trace"] = trace
+        usage_summary = get_usage_summary()
+        SHARED_STATE["llm_usage"] = usage_summary
+        print(
+            f"[LLM usage] calls={usage_summary.get('llm_calls')} "
+            f"total_tokens={usage_summary.get('total_tokens')} "
+            f"prompt={usage_summary.get('total_prompt_tokens')} "
+            f"completion={usage_summary.get('total_completion_tokens')}",
+            flush=True,
+        )
         start_perf = SHARED_STATE.pop("_answer_run_start_perf", None)
         if start_perf is not None:
             elapsed = time.perf_counter() - start_perf
@@ -2194,9 +2294,17 @@ async def background_graph_runner(
             )
             print(f"[Answer timing] {timing_msg}", flush=True)
             SHARED_STATE["logs"].append(f"\n⏱ {timing_msg}\n")
+            usage_msg = (
+                f"Token：prompt={usage_summary.get('total_prompt_tokens')} "
+                f"completion={usage_summary.get('total_completion_tokens')} "
+                f"total={usage_summary.get('total_tokens')} "
+                f"calls={usage_summary.get('llm_calls')}"
+            )
+            SHARED_STATE["logs"].append(f"\n🔢 {usage_msg}\n")
             _append_answer_timing_to_markdown(completed_at, elapsed)
             if run_sess:
                 run_sess.main_line(timing_msg)
+                run_sess.main_line(usage_msg)
                 run_sess.event(
                     "INFO",
                     "server",
@@ -2210,6 +2318,13 @@ async def background_graph_runner(
                     chart_url=str(SHARED_STATE.get("chart_url") or "")[:500],
                     stream_chars=len(str(SHARED_STATE.get("stream_buffer") or "")),
                     final_report_chars=len(str(SHARED_STATE.get("final_report") or "")),
+                    llm_usage=usage_summary,
+                )
+                run_sess.event(
+                    "INFO",
+                    "server",
+                    "llm_usage_summary",
+                    **usage_summary,
                 )
         elif run_sess:
             run_sess.event(
@@ -2219,6 +2334,13 @@ async def background_graph_runner(
                 elapsed_s=None,
                 note="missing perf counter start",
                 task_type=SHARED_STATE.get("task_type"),
+                llm_usage=usage_summary,
+            )
+            run_sess.event(
+                "INFO",
+                "server",
+                "llm_usage_summary",
+                **usage_summary,
             )
         SHARED_STATE["is_running"] = False
 
@@ -2362,6 +2484,7 @@ async def api_chat(req: ChatRequest):
     SHARED_STATE["current_mode"] = req.mode
     SHARED_STATE["last_answer_elapsed_seconds"] = None
     SHARED_STATE["last_answer_completed_at"] = None
+    SHARED_STATE["llm_usage"] = None
 
     SHARED_STATE["run_session"] = None
     SHARED_STATE["current_run_id"] = None
@@ -2516,6 +2639,7 @@ async def api_stream():
                     "clarify_candidates": SHARED_STATE.get("clarify_candidates") or [],
                     "metric_cards": SHARED_STATE.get("metric_cards") or {},
                     "answer_elapsed_seconds": SHARED_STATE.get("last_answer_elapsed_seconds"),
+                    "llm_usage": SHARED_STATE.get("llm_usage"),
                     "ablation_trace": SHARED_STATE.get("ablation_trace") or get_ablation_trace(),
                 }
                 _dbg_stream(
@@ -2538,17 +2662,20 @@ async def api_stream():
                             "chart_url": SHARED_STATE.get("chart_url"),
                             "answer_elapsed_seconds": SHARED_STATE.get("last_answer_elapsed_seconds"),
                             "answer_completed_at": SHARED_STATE.get("last_answer_completed_at"),
+                            "llm_usage": SHARED_STATE.get("llm_usage"),
                         }
                     )
                     done_payload: Dict[str, Any] = {
                         "status": "done",
                         "history_index": len(hist) - 1,
                         "answer_elapsed_seconds": SHARED_STATE.get("last_answer_elapsed_seconds"),
+                        "llm_usage": SHARED_STATE.get("llm_usage"),
                     }
                 else:
                     done_payload = {
                         "status": "done",
                         "answer_elapsed_seconds": SHARED_STATE.get("last_answer_elapsed_seconds"),
+                        "llm_usage": SHARED_STATE.get("llm_usage"),
                     }
                 yield f"event: complete\ndata: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
                 break

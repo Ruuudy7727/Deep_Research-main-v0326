@@ -1,0 +1,6 @@
+task_id,variant,correctness,completeness,traceability,actionability,root_cause_correct,unsupported_claim_rate,reviewer,notes
+deep_001,full,,,,,,,,TODO: scores use 1-5 except root_cause_correct and unsupported_claim_rate use 0-1
+deep_001,wo_multi_agent,,,,,,,,
+end_001,full,,,,,,,,
+end_001,rag_only,,,,,,,,
+end_001,pure_llm,,,,,,,,
